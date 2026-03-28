@@ -9,10 +9,12 @@ from pdf2image import convert_from_path
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
+from datetime import datetime
 import google.generativeai as genai
 
 # Load environment variables
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 # Configure Gemini AI - with error handling for missing key
 api_key = os.getenv("GOOGLE_API_KEY")
@@ -174,6 +176,81 @@ def get_jobs():
     response = requests.get(url, headers=headers, params=querystring)
     data = response.json()
     return {"jobs": data.get("data", [])}
+
+# LinkedIn scraping route
+LINKEDIN_USERNAME = os.getenv("LINKEDIN_USERNAME")
+LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
+
+
+@app.post("/job-recommendations/linkedin")
+async def get_linkedin_jobs(
+    linkedin_username: Optional[str] = Form(None),
+    linkedin_password: Optional[str] = Form(None),
+    keywords: str = Form("Software Engineer"),
+    location: str = Form("India"),
+):
+    username = linkedin_username or LINKEDIN_USERNAME
+    password = linkedin_password or LINKEDIN_PASSWORD
+    # keep keywords/location from form or defaults
+
+    if not username or not password:
+        return {"error": "LinkedIn credentials not configured; set LINKEDIN_USERNAME and LINKEDIN_PASSWORD environment variables."}
+
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        import time
+
+        options = webdriver.ChromeOptions()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver.get("https://www.linkedin.com/login")
+        time.sleep(2)
+
+        username_el = driver.find_element(By.ID, "username")
+        password_el = driver.find_element(By.ID, "password")
+        username_el.send_keys(username)
+        password_el.send_keys(password)
+        driver.find_element(By.XPATH, "//button[@type='submit']").click()
+        time.sleep(5)
+
+        search_url = f"https://www.linkedin.com/jobs/search/?keywords={keywords.replace(' ', '%20')}&location={location.replace(' ', '%20')}"
+        driver.get(search_url)
+        time.sleep(5)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(3)
+
+        job_cards = driver.find_elements(By.XPATH, "//ul//li[contains(@class,'jobs-search-results__list-item') or contains(@class,'job-card-container')]")
+        jobs = []
+
+        for card in job_cards[:15]:
+            try:
+                link_el = card.find_element(By.XPATH, ".//a[contains(@href,'/jobs/view')]")
+                title_el = card.find_elements(By.XPATH, ".//h3[contains(@class,'job-card-list__title') or contains(@class,'job-card__title') or contains(@class,'artdeco-entity-lockup__title')]")
+                company_el = card.find_elements(By.XPATH, ".//h4[contains(@class,'job-card-container__company-name') or contains(@class,'job-card-list__company-name') or contains(@class,'artdeco-entity-lockup__subtitle')]")
+                title = title_el[0].text.strip() if title_el else ""
+                company = company_el[0].text.strip() if company_el else ""
+                jobs.append({
+                    "job_title": title,
+                    "employer_name": company,
+                    "job_city": "",
+                    "job_country": "",
+                    "job_employment_type": "",
+                    "job_posted_at_datetime_utc": datetime.utcnow().isoformat() + "Z",
+                    "job_apply_link": link_el.get_attribute('href'),
+                })
+            except Exception:
+                continue
+
+        driver.quit()
+        return {"jobs": jobs}
+    except Exception as e:
+        return {"error": f"LinkedIn scraping failed: {str(e)}"}
 
 # Optional: Run server directly
 if __name__ == "__main__":

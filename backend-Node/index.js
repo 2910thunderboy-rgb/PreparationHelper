@@ -60,29 +60,33 @@ app.post("/api/analyze-resume", (req, res) => {
 });
 
 app.get("/job-recommendations", async (req, res) => {
-  const url = "https://jsearch.p.rapidapi.com/search";
-  const queryParams = {
-    query: "developer in India",
-    page: "1",
-    num_pages: "2",
-  };
+  const linkedinUsername = process.env.LINKEDIN_USERNAME;
+  const linkedinPassword = process.env.LINKEDIN_PASSWORD;
 
-  const headers = {
-    "X-RapidAPI-Key": process.env.RAPIDAPI_KEY,
-    "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
-  };
+  if (!linkedinUsername || !linkedinPassword) {
+    return res.status(500).json({ error: "LinkedIn credentials are not configured in env vars" });
+  }
+
+  const keywords = req.query.keywords || "Software Engineer";
+  const location = req.query.location || "India";
 
   try {
-    const response = await axios.get(url, {
-      headers,
-      params: queryParams,
+    const response = await axios.post("http://localhost:8000/job-recommendations/linkedin", {
+      linkedin_username: linkedinUsername,
+      linkedin_password: linkedinPassword,
+      keywords,
+      location,
+    }, {
+      headers: {
+        "Content-Type": "application/json",
+      },
     });
 
-    const jobs = response.data.data || [];
-    res.json({ jobs });
+    const jobs = response.data.jobs || [];
+    return res.json({ jobs });
   } catch (error) {
-    console.error("Error fetching jobs:", error.message);
-    res.status(500).json({ error: "Failed to fetch job recommendations" });
+    console.error("Error fetching LinkedIn jobs:", error.message || error);
+    return res.status(500).json({ error: "Failed to fetch LinkedIn job recommendations" });
   }
 });
 
