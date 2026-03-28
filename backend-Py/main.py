@@ -14,8 +14,12 @@ import google.generativeai as genai
 # Load environment variables
 load_dotenv()
 
-# Configure Gemini AI
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+# Configure Gemini AI - with error handling for missing key
+api_key = os.getenv("GOOGLE_API_KEY")
+if api_key and api_key != "your_google_gemini_api_key_here":
+    genai.configure(api_key=api_key)
+else:
+    print("WARNING: GOOGLE_API_KEY not set in .env - resume analysis will fail")
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -58,10 +62,47 @@ def clean_gemini_output(text):
     text = re.sub(r"\n{2,}", "\n\n", text)
     return text.strip()
 
-def analyze_resume_text(resume_text, job_description=None):
-    model = genai.GenerativeModel("gemini-1.5-flash")
+def get_available_model():
+    """Dynamically find the best available Gemini model for generateContent"""
+    try:
+        models = genai.list_models()
+        # Filter models that support generateContent
+        available_models = []
+        for m in models:
+            if "generateContent" in m.supported_generation_methods:
+                available_models.append(m.name.replace("models/", ""))
+        
+        if available_models:
+            print(f"Available Gemini models: {available_models}")
+            # Prefer latest/fastest models
+            priority = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.5-pro-latest"]
+            for model_name in priority:
+                if model_name in available_models:
+                    print(f"Selected model: {model_name}")
+                    return model_name
+            # If no priority match, use first available
+            return available_models[0]
+        else:
+            return None
+    except Exception as e:
+        print(f"Error listing models: {e}")
+        return None
 
-    prompt = f"""
+def analyze_resume_text(resume_text, job_description=None):
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key or api_key == "your_google_gemini_api_key_here":
+        return "❌ Resume analysis is not configured. Please set GOOGLE_API_KEY in .env file and restart the service."
+    
+    try:
+        # Get the best available model dynamically
+        model_name = get_available_model()
+        
+        if not model_name:
+            return "❌ No compatible Gemini model found. Please check your API key and ensure Gemini API is enabled."
+        
+        model = genai.GenerativeModel(model_name)
+
+        prompt = f"""
 Assume you are a professional resume analyst and career coach.
 You are tasked with analyzing a resume and providing a detailed report.
 
@@ -79,25 +120,36 @@ Resume:
 {resume_text}
 """
 
-    if job_description:
-        prompt += f"\n\nCompare with this job description:\n{job_description}"
+        if job_description:
+            prompt += f"\n\nCompare with this job description:\n{job_description}"
 
-    response = model.generate_content(prompt)
-    return clean_gemini_output(response.text)
+        response = model.generate_content(prompt)
+        return clean_gemini_output(response.text)
+    except Exception as e:
+        print(f"Error in analyze_resume_text: {e}")
+        return f"❌ Failed to analyze resume: {str(e)}"
 
 @app.post("/analyze-resume/")
 async def analyze_resume_api(file: UploadFile = File(...), job_description: str = Form("")):
-    temp_dir = tempfile.mkdtemp()
-    file_path = os.path.join(temp_dir, file.filename)
+    try:
+        temp_dir = tempfile.mkdtemp()
+        file_path = os.path.join(temp_dir, file.filename)
 
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    resume_text = extract_text_from_pdf(file_path)
-    analysis = analyze_resume_text(resume_text, job_description)
+        resume_text = extract_text_from_pdf(file_path)
+        if not resume_text.strip():
+            shutil.rmtree(temp_dir)
+            return {"analysis": "❌ Could not extract text from PDF. Please ensure the file is a valid PDF with readable text."}
 
-    shutil.rmtree(temp_dir)
-    return {"analysis": analysis}
+        analysis = analyze_resume_text(resume_text, job_description)
+
+        shutil.rmtree(temp_dir)
+        return {"analysis": analysis}
+    except Exception as e:
+        print(f"Error in analyze_resume_api: {e}")
+        return {"analysis": f"❌ Error processing resume: {str(e)}"}
 
 # ---------- Job Recommendations Logic ----------
 # app = FastAPI()

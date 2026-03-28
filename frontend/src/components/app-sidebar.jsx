@@ -10,6 +10,7 @@ import {
   HelpCircle,
   LogOut,
 } from "lucide-react";
+import axios from 'axios';
 
 import {
   Sidebar,
@@ -49,20 +50,30 @@ const mainItems = [
 const generalItems = [
   {
     title: "Profile",
-    url: "#",
+    url: "/app/profile",
     icon: User,
-  },
-  {
-    title: "Setting",
-    url: "#",
-    icon: Settings,
   },
 ];
 
-import {Link , useLocation} from 'react-router-dom';
+import {Link , useLocation, useNavigate} from 'react-router-dom';
 
 export default function AppSidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    try {
+      await axios.post('http://localhost:3000/api/users/logout', {}, { withCredentials: true });
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
+      navigate('/');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
+      navigate('/login');
+    }
+  };
   return (
     <div className="relative h-full">
       <Sidebar className="bg-[#121212] text-gray-300 border-r border-gray-800 h-full flex flex-col">
@@ -136,13 +147,13 @@ export default function AppSidebar() {
           
           {/* Logout button */}
           <div className="mt-auto mb-4 px-4">
-            <a
-              href="#"
-              className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-all"
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-all"
             >
               <LogOut className="w-5 h-5" />
               <span className="text-sm">Log Out</span>
-            </a>
+            </button>
           </div>
         </SidebarContent>
       </Sidebar>

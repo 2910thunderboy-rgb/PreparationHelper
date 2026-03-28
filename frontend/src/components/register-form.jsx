@@ -21,26 +21,32 @@ export function RegisterForm(props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   
   const { className, ...rest } = props;
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setError("");
+    setLoading(true);
     try {
-      await axios
+      const response = await axios
         .post("http://localhost:3000/api/users/", {
           name,
           email,
           password,
-        })
-        .then(() => {
-          navigate('/app')
-          console.log("User created")
-        })
+        }, { withCredentials: true })
+      localStorage.setItem('authToken', response.data._id);
+      localStorage.setItem('user', JSON.stringify(response.data));
+      navigate('/app')
+      console.log("User created")
     } catch (error) {
+      setError(error.response?.data?.message || "Registration failed. Please try again.");
       console.log(error)
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -92,17 +98,18 @@ export function RegisterForm(props) {
                   placeholder="Enter your password"
                 />
               </div>
-              <Button type="submit" className="w-full bg-white text-black border border-gray-300 hover:bg-gray-100">
-                SignIn
+              {error && <div className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</div>}
+              <Button type="submit" className="w-full bg-white text-black border border-gray-300 hover:bg-gray-100" disabled={loading}>
+                {loading ? 'Creating account...' : 'Sign Up'}
               </Button>
               {/* <Button variant="outline" className="w-full">
                 Login with Google
               </Button> */}
             </div>
             <div className="mt-4 text-center text-sm">
-              Don&apos;t have an account?{" "}
-              <a href="#" className="underline underline-offset-4">
-                Sign up
+              Already have an account?{" "}
+              <a href="/login" className="underline underline-offset-4">
+                Login
               </a>
             </div>
           </form>

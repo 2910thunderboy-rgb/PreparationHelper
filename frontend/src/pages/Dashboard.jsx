@@ -1,11 +1,23 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const user = React.useMemo(() => {
+    try {
+      const saved = localStorage.getItem('user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const name = user?.name || 'Candidate';
 
   return (
     <div className="min-h-screen bg-[#f9fafb] p-6 space-y-6">
       {/* Header */}
-      <h1 className="text-2xl font-bold text-gray-800">👋 Welcome, Pravin!</h1>
+      <h1 className="text-2xl font-bold text-gray-800">👋 Welcome, {name}!</h1>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -20,7 +32,10 @@ export default function Dashboard() {
         <div className="bg-white p-6 rounded-xl shadow-md col-span-2">
           <h2 className="text-xl font-semibold mb-2">🤖 AI Interview</h2>
           <p className="text-gray-600">Your last score: <span className="font-bold text-purple-600">74%</span></p>
-          <button className="mt-4 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+          <button
+            onClick={() => navigate('/app/interview')}
+            className="mt-4 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700"
+          >
             Start Mock Interview
           </button>
         </div>
