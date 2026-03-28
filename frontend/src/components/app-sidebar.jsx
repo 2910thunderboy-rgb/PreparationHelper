@@ -1,13 +1,9 @@
 import React from 'react';
 import {
-  Calendar,
   Home,
-  User,
   Briefcase,
   FileText,
   BrainCog,
-  Settings,
-  HelpCircle,
   LogOut,
 } from "lucide-react";
 import axios from 'axios';
@@ -44,14 +40,6 @@ const mainItems = [
     title: "Job Recommentation",
     url: "/app/job",
     icon: Briefcase,
-  },
-];
-
-const generalItems = [
-  {
-    title: "Profile",
-    url: "/app/profile",
-    icon: User,
   },
 ];
 
@@ -105,30 +93,6 @@ export default function AppSidebar() {
                         <item.icon className={`w-5 h-5 ${item.active ? "text-white" : "text-gray-400"}`} />
                         <span className="text-sm">{item.title}</span>
                       </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-          
-          {/* General menu */}
-          <SidebarGroup className="mt-4">
-            <SidebarGroupLabel className="px-4 py-2 text-sm text-gray-400">
-              General
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {generalItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild>
-                      <a
-                        href={item.url}
-                        className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-800 hover:text-white transition-all"
-                      >
-                        <item.icon className="w-5 h-5 text-gray-400" />
-                        <span className="text-sm">{item.title}</span>
-                      </a>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
