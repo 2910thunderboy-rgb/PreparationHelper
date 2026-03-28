@@ -59,13 +59,31 @@ app.post("/api/analyze-resume", (req, res) => {
   req.pipe(proxy);
 });
 
-app.get("/job-recommendations", async (req, res) => {
-  const linkedinUsername = process.env.LINKEDIN_USERNAME;
-  const linkedinPassword = process.env.LINKEDIN_PASSWORD;
+app.post("/api/interview-evaluate", async (req, res) => {
+  const { question, answer } = req.body;
 
-  if (!linkedinUsername || !linkedinPassword) {
-    return res.status(500).json({ error: "LinkedIn credentials are not configured in env vars" });
+  if (!question || !answer) {
+    return res.status(400).json({ error: "question and answer are required" });
   }
+
+  try {
+    const response = await axios.post("http://localhost:8000/interview/evaluate", {
+      question,
+      answer,
+    }, {
+      headers: { "Content-Type": "application/json" },
+    });
+
+    return res.json(response.data);
+  } catch (error) {
+    console.error("Error evaluating interview answer:", error.message || error);
+    return res.status(500).json({ error: "Failed to evaluate interview answer" });
+  }
+});
+
+app.get("/job-recommendations", async (req, res) => {
+  const linkedinUsername = "9004076172";
+  const linkedinPassword = "sharai@123";
 
   const keywords = req.query.keywords || "Software Engineer";
   const location = req.query.location || "India";

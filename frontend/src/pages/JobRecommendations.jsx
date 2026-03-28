@@ -70,7 +70,7 @@ const JobRecommendations = () => {
             >
               <h2 className="text-xl font-semibold text-purple-700 mb-1">{job.job_title}</h2>
               <p className="text-gray-600 mb-1">
-                <strong>{job.employer_name}</strong> • {job.job_city}, {job.job_country}
+                <strong>{job.employer_name}</strong> • {job.job_country}
               </p>
               <p className="text-sm text-gray-500">
                 Type: {job.job_employment_type} | Posted:{" "}
