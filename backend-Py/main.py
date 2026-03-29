@@ -1269,19 +1269,21 @@ async def referral_generate_message(request: Request):
     if not job_link or not recipient_name or not resume_link:
         return {"error": "job_link, recipient_name, and resume_link are required"}
 
-    api_key = request.headers.get("X-Gemini-Api-Key") or data.get("gemini_api_key") or os.getenv("GOOGLE_API_KEY")
+    api_key = request.headers.get("X-Gemini-Api-Key") or request.headers.get("gemini_api_key") or data.get("gemini_api_key") or os.getenv("GOOGLE_API_KEY")
     if not api_key or api_key == "your_google_gemini_api_key_here":
-        return {
-            "message": _referral_message_fallback(
-                recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
-            ),
-            "source": "template",
-            "notice": "Gemini API key is not configured; using template fallback.",
-        }
+        # No API key, use fast template
+        message = _referral_message_fallback(
+            recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
+        )
+        return {"message": clean_gemini_output(message), "source": "template"}
 
     try:
-        model_name = get_available_model() or "gemini-1.5-flash"
-        model = genai.GenerativeModel(model_name)
+        import time
+        start_time = time.time()
+        
+        genai.configure(api_key=api_key)
+        
+        # Build prompt
         company_ctx = f" The company or team context is: {company_name}." if company_name else ""
         sender_ctx = (
             f"Sign the message with this exact name on the last line (not [Your Name]): {from_name}."
@@ -1314,26 +1316,47 @@ async def referral_generate_message(request: Request):
             f"Optional job / requisition ID: {job_id or '(none)'}\n"
             f"Resume or portfolio URL: {resume_link}\n"
         )
-        llm_response = model.generate_content(prompt)
-        text_output = ""
-        if hasattr(llm_response, "text") and llm_response.text:
-            text_output = llm_response.text
-        if not text_output:
-            text_output = _referral_message_fallback(
-                recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
-            )
-            return {"message": clean_gemini_output(text_output), "source": "template"}
-
-        return {"message": clean_gemini_output(text_output), "source": "ai"}
+        
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+        
+        def call_gemini_stream():
+            """Call Gemini with streaming enabled"""
+            model = genai.GenerativeModel("gemini-pro")
+            response = model.generate_content(prompt, stream=True)
+            # Collect all streamed chunks
+            text_output = ""
+            for chunk in response:
+                if chunk.text:
+                    text_output += chunk.text
+            return text_output
+        
+        # Execute with 8 second timeout
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(call_gemini_stream)
+            try:
+                text_output = future.result(timeout=8)
+                elapsed = time.time() - start_time
+                print(f"[REFERRAL] Got response in {elapsed:.2f}s via streaming")
+                
+                if text_output:
+                    return {"message": clean_gemini_output(text_output), "source": "ai", "time_ms": int(elapsed * 1000)}
+                else:
+                    raise Exception("Empty response from Gemini")
+            except FuturesTimeoutError:
+                print(f"[REFERRAL] Timeout after 8s, using template")
+                message = _referral_message_fallback(
+                    recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
+                )
+                return {"message": clean_gemini_output(message), "source": "template"}
+            
     except Exception as e:
-        print(f"Referral message generation failed: {e}")
-        return {
-            "message": _referral_message_fallback(
-                recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
-            ),
-            "source": "template",
-            "notice": "AI unavailable; used a polished template instead.",
-        }
+        elapsed = time.time() - start_time
+        print(f"[REFERRAL] Error ({elapsed:.2f}s): {type(e).__name__}: {e}")
+        # Fallback on any error
+        message = _referral_message_fallback(
+            recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
+        )
+        return {"message": clean_gemini_output(message), "source": "template"}
 
 
 def _load_linkedin_company_ids():
