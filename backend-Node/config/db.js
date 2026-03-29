@@ -4,6 +4,7 @@ const connectDB = async () => {
     const uri = process.env.MONGO_URI;
     console.log("[connectDB] Function called");
     console.log("[connectDB] MONGO_URI available:", !!uri);
+    console.log("[connectDB] NODE_ENV:", process.env.NODE_ENV);
 
     if (!uri) {
         console.error("[connectDB] ❌ MONGO_URI is not set");
@@ -22,6 +23,7 @@ const connectDB = async () => {
             return true;
         } catch (error) {
             console.error(`[connectDB] ❌ MongoDB connection error (attempt ${attempt}): ${error.message}`);
+            console.error(`[connectDB] Full error:`, error);
             if (attempt === maxRetries) {
                 console.error(`[connectDB] ❌ All ${maxRetries} attempts failed.`);
                 throw error;
@@ -29,8 +31,5 @@ const connectDB = async () => {
             await new Promise((resolve) => setTimeout(resolve, 1500));
         }
     }
-
-    return false;
-};
 
 export default connectDB;
