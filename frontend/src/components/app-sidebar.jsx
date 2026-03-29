@@ -4,6 +4,7 @@ import {
   Briefcase,
   FileText,
   BrainCog,
+  BookOpen,
   LogOut,
 } from "lucide-react";
 import axios from 'axios';
@@ -41,9 +42,19 @@ const mainItems = [
     url: "/app/job",
     icon: Briefcase,
   },
+  {
+    title: "Notes",
+    url: "/app/notes",
+    icon: BookOpen,
+  },
 ];
 
 import {Link , useLocation, useNavigate} from 'react-router-dom';
+
+function isNavActive(pathname, item) {
+  if (item.url === "/app/notes") return pathname.startsWith("/app/notes");
+  return pathname === item.url;
+}
 
 export default function AppSidebar() {
   const location = useLocation();
@@ -85,8 +96,8 @@ export default function AppSidebar() {
                     <Link
                          to={item.url}
                          className={`flex items-center gap-3 px-4 py-2 rounded-lg ${
-                           location.pathname === item.url
-                             ? "bg-purple-600 text-white" 
+                           isNavActive(location.pathname, item)
+                             ? "bg-purple-600 text-white"
                              : "hover:bg-gray-800 hover:text-white"
                          } transition-all`}
                        >

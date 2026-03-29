@@ -81,6 +81,16 @@ app.post("/api/interview-evaluate", async (req, res) => {
   }
 });
 
+const PY_API = "http://127.0.0.1:8000";
+
+async function fetchJsearchJobs(keywords, location) {
+  const { data } = await axios.get(`${PY_API}/job-recommendations`, {
+    params: { keywords, location },
+    timeout: 60000,
+  });
+  return data;
+}
+
 app.get("/job-recommendations", async (req, res) => {
   const linkedinUsername = "9004076172";
   const linkedinPassword = "sharai@123";
@@ -89,22 +99,75 @@ app.get("/job-recommendations", async (req, res) => {
   const location = req.query.location || "India";
 
   try {
-    const response = await axios.post("http://localhost:8000/job-recommendations/linkedin", {
-      linkedin_username: linkedinUsername,
-      linkedin_password: linkedinPassword,
-      keywords,
-      location,
-    }, {
-      headers: {
-        "Content-Type": "application/json",
+    const response = await axios.post(
+      `${PY_API}/job-recommendations/linkedin`,
+      {
+        linkedin_username: linkedinUsername,
+        linkedin_password: linkedinPassword,
+        keywords,
+        location,
       },
-    });
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 180000,
+      }
+    );
 
-    const jobs = response.data.jobs || [];
-    return res.json({ jobs });
+    const linkedinErr = response.data?.error;
+    const linkedinJobs = Array.isArray(response.data?.jobs) ? response.data.jobs : [];
+
+    if (!linkedinErr && linkedinJobs.length > 0) {
+      return res.json({ jobs: linkedinJobs, source: "linkedin" });
+    }
+
+    console.warn(
+      "[job-recommendations] LinkedIn unavailable or empty:",
+      linkedinErr || "(no jobs)"
+    );
+
+    const fb = await fetchJsearchJobs(keywords, location);
+    const fbJobs = Array.isArray(fb?.jobs) ? fb.jobs : [];
+    if (fbJobs.length > 0) {
+      return res.json({
+        jobs: fbJobs,
+        source: "jsearch",
+        notice:
+          "LinkedIn automation did not return results (login, checkpoint, or layout change). Showing backup listings from JSearch.",
+      });
+    }
+
+    const combined =
+      [linkedinErr, fb?.error].filter(Boolean).join(" · ") ||
+      "No jobs returned. Ensure backend-Py is running; set RAPIDAPI_KEY in backend-Py .env for backup listings.";
+
+    return res.json({ jobs: [], error: combined });
   } catch (error) {
     console.error("Error fetching LinkedIn jobs:", error.message || error);
-    return res.status(500).json({ error: "Failed to fetch LinkedIn job recommendations" });
+    try {
+      const fb = await fetchJsearchJobs(keywords, location);
+      const fbJobs = Array.isArray(fb?.jobs) ? fb.jobs : [];
+      if (fbJobs.length > 0) {
+        return res.json({
+          jobs: fbJobs,
+          source: "jsearch",
+          notice: "Primary source failed; using backup job listings.",
+        });
+      }
+      return res.json({
+        jobs: [],
+        error:
+          fb?.error ||
+          error.message ||
+          "Cannot load jobs. Is backend-Py running on port 8000?",
+      });
+    } catch (e2) {
+      return res.json({
+        jobs: [],
+        error:
+          "Job service unreachable. Start backend-Py (port 8000) and ensure Node can reach it. " +
+          (e2.message || ""),
+      });
+    }
   }
 });
 

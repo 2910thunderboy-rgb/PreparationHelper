@@ -7,7 +7,7 @@ import pdfplumber
 import pytesseract
 from pdf2image import convert_from_path
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, Form, Body, Request
+from fastapi import FastAPI, File, UploadFile, Form, Body, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from datetime import datetime
@@ -165,34 +165,140 @@ async def analyze_resume_api(file: UploadFile = File(...), job_description: str 
 #     allow_headers=["*"],
 # )
 
-@app.get("/job-recommendations")
-def get_jobs():
-    url = "https://jsearch.p.rapidapi.com/search"
-    querystring = {"query": "developer in India", "page": "1", "num_pages": "2"}
-    headers = {
-        "X-RapidAPI-Key": os.getenv("RAPIDAPI_KEY"),
-        "X-RapidAPI-Host": "jsearch.p.rapidapi.com"
+def _normalize_jsearch_job(job: dict) -> dict:
+    """Map JSearch payload to the shape expected by the frontend."""
+    if not isinstance(job, dict):
+        return {}
+    title_raw = str(job.get("job_title") or job.get("title") or "Open role")
+    title = title_raw.split("\n")[0].strip()
+    posted = job.get("job_posted_at_datetime_utc") or job.get("job_posted_at_timestamp") or ""
+    if not posted:
+        posted = datetime.utcnow().isoformat() + "Z"
+    elif isinstance(posted, (int, float)):
+        try:
+            posted = datetime.utcfromtimestamp(posted).isoformat() + "Z"
+        except Exception:
+            posted = datetime.utcnow().isoformat() + "Z"
+    else:
+        posted = str(posted)
+        if "T" not in posted and " " in posted:
+            posted = posted.replace(" ", "T", 1)
+        if not posted.endswith("Z") and "+" not in posted[-6:]:
+            posted = posted.rstrip() + ("Z" if "T" in posted else "")
+    apply_link = job.get("job_apply_link") or job.get("job_google_link") or "#"
+    return {
+        "job_title": title,
+        "employer_name": str(job.get("employer_name") or job.get("employer_company_name") or "Company"),
+        "job_city": str(job.get("job_city") or ""),
+        "job_country": str(job.get("job_country") or ""),
+        "job_employment_type": str(job.get("job_employment_type") or "Full-time"),
+        "job_posted_at_datetime_utc": posted,
+        "job_apply_link": str(apply_link),
     }
 
-    response = requests.get(url, headers=headers, params=querystring)
-    data = response.json()
-    return {"jobs": data.get("data", [])}
+
+@app.get("/job-recommendations")
+def get_jobs(
+    keywords: str = Query("Software Engineer"),
+    location: str = Query("India"),
+):
+    """Backup job feed via JSearch (RapidAPI). Used when LinkedIn scraping fails."""
+    key = os.getenv("RAPIDAPI_KEY")
+    if not key:
+        return {
+            "jobs": [],
+            "error": "RAPIDAPI_KEY is not set in backend-Py .env (optional backup for job listings).",
+        }
+    url = "https://jsearch.p.rapidapi.com/search"
+    q = f"{keywords.strip()} in {location.strip()}".strip()
+    querystring = {"query": q, "page": "1", "num_pages": "1"}
+    headers = {
+        "X-RapidAPI-Key": key,
+        "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
+    }
+    try:
+        response = requests.get(url, headers=headers, params=querystring, timeout=45)
+        data = response.json()
+        if response.status_code != 200:
+            msg = data.get("message") if isinstance(data, dict) else "JSearch HTTP error"
+            return {"jobs": [], "error": str(msg)}
+        raw = data.get("data") if isinstance(data, dict) else []
+        jobs = [_normalize_jsearch_job(j) for j in (raw or [])]
+        return {"jobs": jobs}
+    except Exception as e:
+        return {"jobs": [], "error": str(e)}
 
 # LinkedIn scraping route
 LINKEDIN_USERNAME = os.getenv("LINKEDIN_USERNAME")
 LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
 
 
+def _linkedin_job_id_from_url(url: str) -> Optional[str]:
+    if not url:
+        return None
+    m = re.search(r"/jobs/view/(\d+)", url)
+    return m.group(1) if m else None
+
+
+def _absolute_linkedin_href(href: str) -> str:
+    h = (href or "").strip()
+    if h.startswith("/"):
+        return "https://www.linkedin.com" + h
+    return h
+
+
+def _looks_like_search_summary_title(text: str) -> bool:
+    if not text or len(text) < 3:
+        return True
+    lower = text.lower()
+    if lower.startswith("(") and "jobs in" in lower:
+        return True
+    if "software engineer jobs" in lower and "in" in lower:
+        return True
+    if re.match(r"^\(\d+\)\s+.+\s+jobs\s+in\s+", lower):
+        return True
+    return False
+
+
+def _primary_job_title_line(text: str) -> str:
+    """LinkedIn often concatenates a second line (e.g. 'with verification'); keep only the first line."""
+    if not text:
+        return ""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    first = normalized.split("\n", 1)[0].strip()
+    return first
+
+
 @app.post("/job-recommendations/linkedin")
-async def get_linkedin_jobs(
-    linkedin_username: Optional[str] = Form(None),
-    linkedin_password: Optional[str] = Form(None),
-    keywords: str = Form("Software Engineer"),
-    location: str = Form("India"),
-):
+async def get_linkedin_jobs(request: Request):
+    linkedin_username: Optional[str] = None
+    linkedin_password: Optional[str] = None
+    keywords = "Software Engineer"
+    location = "India"
+    content_type = request.headers.get("content-type", "")
+    try:
+        if "application/json" in content_type:
+            data = await request.json()
+            if isinstance(data, dict):
+                linkedin_username = data.get("linkedin_username")
+                linkedin_password = data.get("linkedin_password")
+                if data.get("keywords"):
+                    keywords = str(data["keywords"])
+                if data.get("location"):
+                    location = str(data["location"])
+        else:
+            form = await request.form()
+            linkedin_username = form.get("linkedin_username")
+            linkedin_password = form.get("linkedin_password")
+            if form.get("keywords"):
+                keywords = str(form.get("keywords"))
+            if form.get("location"):
+                location = str(form.get("location"))
+    except Exception:
+        pass
+
     username = linkedin_username or LINKEDIN_USERNAME
     password = linkedin_password or LINKEDIN_PASSWORD
-    # keep keywords/location from form or defaults
 
     if not username or not password:
         return {"error": "LinkedIn credentials not configured; set LINKEDIN_USERNAME and LINKEDIN_PASSWORD environment variables."}
@@ -239,12 +345,30 @@ async def get_linkedin_jobs(
             pass
 
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(3)
+        time.sleep(2)
 
-        # Repeated scroll to load more jobs in case of lazy load/pagination, up to 10 iterations.
-        for _ in range(10):
+        # Scroll every matching list panel (not only the first match — wrong panel can be empty and break loading).
+        list_scroll_selectors = [
+            "div.jobs-search-results-list",
+            "div.scaffold-layout__list",
+            "ul.scaffold-layout__list-container",
+            "ul.jobs-search-results__list",
+            "div.scaffold-layout__list-container",
+        ]
+        for _ in range(18):
+            for sel in list_scroll_selectors:
+                try:
+                    for panel in driver.find_elements(By.CSS_SELECTOR, sel):
+                        try:
+                            driver.execute_script(
+                                "arguments[0].scrollTop = arguments[0].scrollHeight", panel
+                            )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            time.sleep(1)
 
         def extract_detail_info(detail_url):
             try:
@@ -252,28 +376,66 @@ async def get_linkedin_jobs(
                 driver.execute_script("window.open('');")
                 driver.switch_to.window(driver.window_handles[-1])
                 driver.get(detail_url)
-                time.sleep(4)
+                time.sleep(3)
 
                 detail_title = ""
                 detail_company = ""
                 detail_location = "India"
 
                 try:
-                    detail_title_el = driver.find_elements(By.XPATH, "//h1[contains(@class,'topcard__title') or contains(@class,'jobs-unified-top-card__job-title') or contains(@class,'title')] | //span[contains(@class,'d59fd9fe')] | //div[contains(@class,'_3ac4ffe8') and contains(@class,'_9572431e')]//span")
-                    if detail_title_el and detail_title_el[0].text.strip():
-                        detail_title = detail_title_el[0].text.strip()
+                    og_els = driver.find_elements(By.CSS_SELECTOR, "meta[property='og:title']")
+                    if og_els:
+                        raw = (og_els[0].get_attribute("content") or "").strip()
+                        if raw:
+                            part = raw.split(" | ")[0].strip()
+                            if " at " in part:
+                                part = part.split(" at ")[0].strip()
+                            detail_title = part
                 except Exception:
                     pass
 
+                if not detail_title:
+                    try:
+                        detail_title = driver.execute_script(
+                            """
+                            var s = 'h1.jobs-unified-top-card__job-title, '
+                              + 'h1[class*="job-title"], '
+                              + '.job-details-jobs-unified-top-card__job-title, '
+                              + 'h1.topcard__title, '
+                              + '.jobs-details-top-card__title-text';
+                            var el = document.querySelector(s);
+                            return el && el.innerText ? el.innerText.trim() : '';
+                            """
+                        ) or ""
+                    except Exception:
+                        pass
+
+                if not detail_title:
+                    try:
+                        detail_title_el = driver.find_elements(
+                            By.XPATH,
+                            "//h1[contains(@class,'topcard__title') or contains(@class,'jobs-unified-top-card__job-title') or contains(@class,'job-title')]",
+                        )
+                        if detail_title_el and detail_title_el[0].text.strip():
+                            detail_title = detail_title_el[0].text.strip()
+                    except Exception:
+                        pass
+
                 try:
-                    detail_company_el = driver.find_elements(By.XPATH, "//a[contains(@href,'/company')]/span | //span[contains(@class,'topcard__flavor--company-name') or contains(@class,'jobs-unified-top-card__company-name')] | //div[contains(@class,'_66379f73') or contains(@class,'_2f31586a')]//span")
+                    detail_company_el = driver.find_elements(
+                        By.XPATH,
+                        "//a[contains(@href,'/company')]/span | //span[contains(@class,'topcard__flavor--company-name') or contains(@class,'jobs-unified-top-card__company-name')] | //div[contains(@class,'_66379f73') or contains(@class,'_2f31586a')]//span",
+                    )
                     if detail_company_el and detail_company_el[0].text.strip():
                         detail_company = detail_company_el[0].text.strip()
                 except Exception:
                     pass
 
                 try:
-                    detail_location_el = driver.find_elements(By.XPATH, "//span[contains(@class,'topcard__flavor--bullet') or contains(@class,'jobs-unified-top-card__bullet') or contains(@class,'job-result-card__location')]")
+                    detail_location_el = driver.find_elements(
+                        By.XPATH,
+                        "//span[contains(@class,'topcard__flavor--bullet') or contains(@class,'jobs-unified-top-card__bullet') or contains(@class,'job-result-card__location')]",
+                    )
                     if detail_location_el and detail_location_el[0].text.strip():
                         detail_location = detail_location_el[0].text.strip()
                 except Exception:
@@ -290,12 +452,23 @@ async def get_linkedin_jobs(
                 print("Detail extraction failed", str(e))
                 return "", "", "India"
 
-        # try two XPath strategies to handle DOM changes
+        # Job list DOM varies; collect cards when possible.
         job_cards = driver.find_elements(By.XPATH, "//ul[contains(@class,'jobs-search-results__list')]/li")
         if not job_cards:
-            job_cards = driver.find_elements(By.XPATH, "//div[contains(@class,'job-card-container') or contains(@class,'jobs-search-results__list-item') or contains(@class,'jobs-search-results__list__item')]")
+            job_cards = driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class,'job-card-container') or contains(@class,'jobs-search-results__list-item') or contains(@class,'jobs-search-results__list__item')]",
+            )
         if not job_cards:
-            job_cards = driver.find_elements(By.XPATH, "//li[contains(@class,'job-result-card') or contains(@class,'base-card')]")
+            job_cards = driver.find_elements(
+                By.XPATH,
+                "//li[contains(@class,'job-result-card') or contains(@class,'base-card')]",
+            )
+        if not job_cards:
+            job_cards = driver.find_elements(
+                By.CSS_SELECTOR,
+                "div.job-card-container, li.jobs-search-results__list-item, li.scaffold-layout__list-item",
+            )
 
         print(f"Found {len(job_cards)} job cards (XPath fallback applied)")
         for idx, card in enumerate(job_cards):
@@ -305,17 +478,52 @@ async def get_linkedin_jobs(
             except Exception as e:
                 print(f"Could not read card {idx} text: {e}")
         jobs = []
+        seen_job_ids = set()
+        kw_lower = keywords.strip().lower()
 
         for i, card in enumerate(job_cards):
             try:
-                # Most LinkedIn job cards have a job URL in an <a> tag
-                link_el = card.find_element(By.XPATH, ".//a[contains(@href,'/jobs/view') or contains(@href,'/jobs/details')]")
+                link_el = None
+                for xp in (
+                    ".//a[contains(@href,'/jobs/view')]",
+                    ".//a[contains(@href,'jobs/view')]",
+                    ".//a[contains(@href,'/jobs/details')]",
+                ):
+                    try:
+                        link_el = card.find_element(By.XPATH, xp)
+                        break
+                    except Exception:
+                        continue
+                if link_el is None:
+                    continue
+                job_url = _absolute_linkedin_href(link_el.get_attribute("href") or "")
+                jid = _linkedin_job_id_from_url(job_url)
+                if jid and jid in seen_job_ids:
+                    continue
+
+                # Primary: visible job title on the title link (per-card); avoid global search tab title.
+                link_txt = (link_el.text or "").strip()
+                aria = (link_el.get_attribute("aria-label") or "").strip()
+                title_text = ""
+                if link_txt and not _looks_like_search_summary_title(link_txt):
+                    title_text = link_txt
+                if not title_text and aria:
+                    chunk = aria.split(" at ")[0].split(" | ")[0].strip()
+                    for piece in re.split(r"\s*[—–\-]\s*", chunk):
+                        p = piece.strip()
+                        if p and not _looks_like_search_summary_title(p):
+                            title_text = p
+                            break
+                    if not title_text and not _looks_like_search_summary_title(chunk):
+                        title_text = chunk
+
                 # Job title and company can appear in different tags/classes depending on LinkedIn template version
-                title_elements = card.find_elements(By.XPATH, ".//h3[contains(@class,'job-card-list__title') or contains(@class,'job-card__title') or contains(@class,'artdeco-entity-lockup__title') or contains(@class,'base-search-card__title')] | .//span[contains(@class,'screen-reader-text')]")
+                title_elements = card.find_elements(By.XPATH, ".//h3[contains(@class,'job-card-list__title') or contains(@class,'job-card__title') or contains(@class,'artdeco-entity-lockup__title') or contains(@class,'base-search-card__title')] | .//a[contains(@class,'job-card-list__title') or contains(@class,'job-card-container__link')]")
                 company_elements = card.find_elements(By.XPATH, ".//h4[contains(@class,'job-card-container__company-name') or contains(@class,'job-card-list__company-name') or contains(@class,'artdeco-entity-lockup__subtitle') or contains(@class,'base-search-card__subtitle')] | .//span[contains(@class,'job-card-container__company-name') or contains(@class,'company-name')]")
                 location_elements = card.find_elements(By.XPATH, ".//span[contains(@class,'job-card-container__metadata-item') or contains(@class,'job-card-list__location') or contains(@class,'artdeco-entity-lockup__caption') or contains(@class,'job-search-card__location')]")
 
-                title_text = title_elements[0].text.strip() if title_elements and title_elements[0].text.strip() else ""
+                if not title_text:
+                    title_text = title_elements[0].text.strip() if title_elements and title_elements[0].text.strip() else ""
                 company_text = company_elements[0].text.strip() if company_elements and company_elements[0].text.strip() else ""
                 job_city = location_elements[0].text.strip() if location_elements and location_elements[0].text.strip() else "India"
 
@@ -428,7 +636,7 @@ async def get_linkedin_jobs(
                     except Exception:
                         pass
 
-                # last fallback: use page title for parsing like "Engineer II - Software Development | Accelya"
+                # Split "Title | Company" when both appear in one field (do not use driver.title — it is the same for every card).
                 parsed_company = ""
                 parsed_title = ""
                 if title_text and "|" in title_text:
@@ -437,58 +645,111 @@ async def get_linkedin_jobs(
                         parsed_title = parts[0]
                     if len(parts) >= 2:
                         parsed_company = parts[1]
-                elif "|" in driver.title:
-                    parts = [p.strip() for p in driver.title.split("|") if p.strip()]
-                    if len(parts) >= 1:
-                        parsed_title = parts[0]
-                    if len(parts) >= 2:
-                        parsed_company = parts[1]
 
-                # last fallback: use page title for parsing like "Engineer II - Software Development | Accelya"
-                parsed_company = ""
-                parsed_title = ""
-                if title_text and "|" in title_text:
-                    parts = [p.strip() for p in title_text.split("|") if p.strip()]
-                    if len(parts) >= 1:
-                        parsed_title = parts[0]
-                    if len(parts) >= 2:
-                        parsed_company = parts[1]
-                elif "|" in driver.title:
-                    parts = [p.strip() for p in driver.title.split("|") if p.strip()]
-                    if len(parts) >= 1:
-                        parsed_title = parts[0]
-                    if len(parts) >= 2:
-                        parsed_company = parts[1]
-
-                job_url = link_el.get_attribute('href')
-                if (not parsed_title or parsed_title.lower().startswith('(') or 'jobs in' in parsed_title.lower() or 'software engineer jobs' in parsed_title.lower()) or (not company_text or company_text.lower().startswith('software engineer')):
+                list_title = (parsed_title or title_text or "").strip()
+                need_detail = (
+                    not list_title
+                    or _looks_like_search_summary_title(list_title)
+                    or list_title.lower() == kw_lower
+                    or (keywords.lower() in list_title.lower() and "jobs in" in list_title.lower())
+                    or not company_text
+                    or company_text.lower().startswith("software engineer")
+                )
+                if need_detail:
                     detail_title, detail_company, detail_location = extract_detail_info(job_url)
-                    if detail_title:
+                    if detail_title and not _looks_like_search_summary_title(detail_title):
                         parsed_title = detail_title
                     if detail_company:
                         company_text = detail_company
                     if detail_location:
                         job_city = detail_location
 
-                # apply defaults as requested
-                job_title = parsed_title or title_text or "Unknown Job Title"
-                employer_name = company_text or parsed_company or "Unknown"
-                if job_title.lower().startswith('(') and 'software engineer jobs' in job_title.lower():
-                    job_title = "Software Engineer"
+                job_title = _primary_job_title_line(parsed_title or title_text or "") or "Unknown Job Title"
+                employer_name = (company_text or parsed_company or "").strip() or "Unknown"
 
                 jobs.append({
                     "job_title": job_title,
                     "employer_name": employer_name,
                     "job_city": "",  # city suppressed per UI requirement
-                    "job_country": "India",
+                    "job_country": location,
                     "job_employment_type": "Full-time",
                     "job_posted_at_datetime_utc": datetime.utcnow().isoformat() + "Z",
                     "job_apply_link": job_url,
                 })
+                if jid:
+                    seen_job_ids.add(jid)
                 print(f"Parsed job {i}: title={job_title}, employer={employer_name}, city={job_city}, url={job_url}")
             except Exception as e:
                 print(f"Job card parse failed: {e}")
                 continue
+
+        # If list selectors found no parseable cards (LinkedIn DOM / template drift), harvest job links from the page.
+        if not jobs:
+            print("No jobs from card walkthrough; falling back to global job view links")
+            seen_fb = set()
+            anchors = driver.find_elements(
+                By.XPATH,
+                "//a[contains(@href,'/jobs/view/') or contains(@href,'/jobs/view?')]",
+            )
+            for a in anchors:
+                try:
+                    raw_href = _absolute_linkedin_href(a.get_attribute("href") or "")
+                    if "/jobs/view" not in raw_href:
+                        continue
+                    jid = _linkedin_job_id_from_url(raw_href)
+                    if jid and jid in seen_fb:
+                        continue
+
+                    link_txt = (a.text or "").strip()
+                    aria = (a.get_attribute("aria-label") or "").strip()
+                    title_text = ""
+                    if link_txt and not _looks_like_search_summary_title(link_txt):
+                        title_text = link_txt
+                    if not title_text and aria:
+                        chunk = aria.split(" at ")[0].split(" | ")[0].strip()
+                        for piece in re.split(r"\s*[—–\-]\s*", chunk):
+                            p = piece.strip()
+                            if p and not _looks_like_search_summary_title(p):
+                                title_text = p
+                                break
+                        if not title_text and not _looks_like_search_summary_title(chunk):
+                            title_text = chunk
+
+                    company_text = ""
+                    parsed_title = ""
+                    list_title = title_text.strip()
+                    kw_lower_fb = keywords.strip().lower()
+                    need_detail = (
+                        not list_title
+                        or _looks_like_search_summary_title(list_title)
+                        or list_title.lower() == kw_lower_fb
+                        or not company_text
+                    )
+                    if need_detail:
+                        dt, dc, dl = extract_detail_info(raw_href)
+                        if dt and not _looks_like_search_summary_title(dt):
+                            parsed_title = dt
+                        if dc:
+                            company_text = dc
+                    job_title = _primary_job_title_line(parsed_title or title_text or "") or "Unknown Job Title"
+                    employer_name = (company_text or "").strip() or "Unknown"
+                    jobs.append(
+                        {
+                            "job_title": job_title,
+                            "employer_name": employer_name,
+                            "job_city": "",
+                            "job_country": location,
+                            "job_employment_type": "Full-time",
+                            "job_posted_at_datetime_utc": datetime.utcnow().isoformat() + "Z",
+                            "job_apply_link": raw_href,
+                        }
+                    )
+                    if jid:
+                        seen_fb.add(jid)
+                    print(f"Fallback parsed job: title={job_title}, employer={employer_name}, url={raw_href}")
+                except Exception as e:
+                    print(f"Fallback anchor parse failed: {e}")
+                    continue
 
         driver.quit()
         return {"jobs": jobs}

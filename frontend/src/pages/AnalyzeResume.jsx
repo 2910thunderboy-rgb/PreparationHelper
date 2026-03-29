@@ -1,6 +1,7 @@
 import { useState } from "react";
 import axios from "axios";
 import jsPDF from "jspdf";
+import { recordResumeAnalysis } from "@/lib/dashboardStats";
 
 const AnalyzeResume = () => {
     const [file, setFile] = useState(null);
@@ -35,6 +36,7 @@ const AnalyzeResume = () => {
             });
 
             setAnalysis(response.data.analysis);
+            recordResumeAnalysis();
         } catch (error) {
             console.error("Error analyzing resume:", error);
             setError("❌ Failed to analyze the resume. Please try again.");
