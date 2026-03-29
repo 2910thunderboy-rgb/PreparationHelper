@@ -4,6 +4,9 @@ import cookieParser from "cookie-parser";
 import axios from "axios";
 import connectDB from "./config/db.js";
 import userRoutes from "./routes/userRoutes.js";
+import jwt from "jsonwebtoken";
+import User from "./models/userModel.js";
+import { decryptField } from "./utils/fieldEncryption.js";
 
 console.log("[VERCEL] Initializing Express app for serverless");
 
@@ -104,6 +107,35 @@ const proxyRequest = async (req, res, pythonPath) => {
   const headers = { ...req.headers };
   delete headers.host;
   delete headers['content-length'];
+
+  // Try to get user keys if authenticated
+  let geminiKey = "";
+  let rapidKey = "";
+  try {
+    const token = req.cookies.jwt;
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+      if (user) {
+        if (user.geminiApiKeyEnc) {
+          geminiKey = decryptField(user.geminiApiKeyEnc);
+        }
+        if (user.rapidApiKeyEnc) {
+          rapidKey = decryptField(user.rapidApiKeyEnc);
+        }
+      }
+    }
+  } catch (err) {
+    console.log("[PROXY] Could not get user keys:", err.message);
+  }
+
+  // Add keys to headers
+  if (geminiKey) {
+    headers['gemini_api_key'] = geminiKey;
+  }
+  if (rapidKey) {
+    headers['rapid_api_key'] = rapidKey;
+  }
 
   const isJson = req.is('application/json') || req.is('application/x-www-form-urlencoded');
   const body = (req.method === 'GET' || req.method === 'HEAD') ? undefined : (isJson ? req.body : req);
