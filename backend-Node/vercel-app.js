@@ -49,6 +49,15 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
+// If DB isn’t ready, fail fast with 503 instead of query timeout 500.
+app.use((req, res, next) => {
+  if (!dbReady) {
+    console.error("[VERCEL] DB not ready yet for", req.method, req.path);
+    return res.status(503).json({ error: "Service unavailable: DB not connected" });
+  }
+  next();
+});
+
 console.log("[VERCEL] Middleware configured");
 
 // Simple routes
