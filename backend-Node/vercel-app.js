@@ -68,11 +68,18 @@ app.get("/test-db", async (req, res) => {
   }
 });
 
-// If DB isn’t ready, fail fast with 503 instead of query timeout 500.
-app.use((req, res, next) => {
+// If DB isn’t ready, try to connect, fail fast with 503 if still not.
+app.use(async (req, res, next) => {
   if (!dbReady) {
-    console.error("[VERCEL] DB not ready yet for", req.method, req.path);
-    return res.status(503).json({ error: "Service unavailable: DB not connected" });
+    console.log("[VERCEL] DB not ready, attempting connect for", req.method, req.path);
+    try {
+      const result = await connectDB();
+      dbReady = result;
+      console.log("[VERCEL] DB connected on demand:", dbReady);
+    } catch (err) {
+      console.error("[VERCEL] DB connect failed on demand:", err.message);
+      return res.status(503).json({ error: "Service unavailable: DB not connected" });
+    }
   }
   next();
 });
