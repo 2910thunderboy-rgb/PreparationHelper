@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { API_BASE } from "@/lib/utils";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -66,7 +67,7 @@ export default function Interview() {
 
   const evaluateWithGemini = async (question, candidateAnswer) => {
     try {
-      const resp = await axios.post("http://localhost:3000/api/interview-evaluate", {
+      const resp = await axios.post(`${API_BASE}/api/interview-evaluate`, {
         question,
         answer: candidateAnswer,
       });

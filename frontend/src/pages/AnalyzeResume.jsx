@@ -2,6 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import jsPDF from "jspdf";
 import { recordResumeAnalysis } from "@/lib/dashboardStats";
+import { API_BASE } from "@/lib/utils";
 
 function b64ToBlob(b64, mime) {
   const bin = atob(b64);
@@ -44,7 +45,7 @@ const AnalyzeResume = () => {
     setError("");
 
     try {
-      const response = await axios.post("http://localhost:3000/api/analyze-resume/", formData, {
+      const response = await axios.post(`${API_BASE}/api/analyze-resume/`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         withCredentials: true,
       });
@@ -90,7 +91,7 @@ const AnalyzeResume = () => {
       const fd = new FormData();
       fd.append("file", latexFile);
       fd.append("job_description", latexJd);
-      const { data } = await axios.post("http://localhost:3000/api/resume/tailor-latex", fd, {
+      const { data } = await axios.post(`${API_BASE}/api/resume/tailor-latex`, fd, {
         withCredentials: true,
         timeout: 300000,
       });

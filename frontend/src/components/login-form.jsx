@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn, API_BASE } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import axios from "axios";
 import { useNavigate } from "react-router"
@@ -31,7 +31,7 @@ export function LoginForm(props) {
       setError("");
       setLoading(true);
       try {
-        const response = await axios.post("http://localhost:3000/api/users/auth", {
+        const response = await axios.post(`${API_BASE}/api/users/auth`, {
           email,
           password,
         }, { withCredentials: true })

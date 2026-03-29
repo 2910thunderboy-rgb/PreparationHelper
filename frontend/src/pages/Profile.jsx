@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import { API_BASE } from "@/lib/utils";
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -25,7 +26,7 @@ export default function Profile() {
     if (!user) return;
     (async () => {
       try {
-        const { data } = await axios.get("http://localhost:3000/api/users/profile/linkedin", {
+        const { data } = await axios.get(`${API_BASE}/api/users/profile/linkedin`, {
           withCredentials: true,
         });
         setLinkedinStatus({
@@ -48,7 +49,7 @@ export default function Profile() {
     setSaving(true);
     try {
       await axios.put(
-        "http://localhost:3000/api/users/profile/linkedin",
+        `${API_BASE}/api/users/profile/linkedin`,
         {
           linkedinUsername: linkedinUser.trim(),
           linkedinPassword: linkedinPass,

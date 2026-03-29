@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn, API_BASE } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import axios from "axios";
 import { useNavigate } from "react-router"
@@ -33,7 +33,7 @@ export function RegisterForm(props) {
     setLoading(true);
     try {
       const response = await axios
-        .post("http://localhost:3000/api/users/", {
+        .post(`${API_BASE}/api/users/`, {
           name,
           email,
           password,

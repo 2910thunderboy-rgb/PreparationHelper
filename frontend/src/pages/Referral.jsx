@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
+import { API_BASE } from "@/lib/utils";
 import {
   ArrowLeft,
   Building2,
@@ -71,7 +72,7 @@ export default function Referral() {
     setMutualsSearched(false);
     try {
       const res = await axios.post(
-        "http://localhost:3000/api/referral/linkedin-mutuals",
+        `${API_BASE}/api/referral/linkedin-mutuals`,
         { company_key: companyKey },
         {
           headers: { "Content-Type": "application/json" },
@@ -108,7 +109,7 @@ export default function Referral() {
     setGenerated("");
     try {
       const res = await axios.post(
-        "http://localhost:3000/api/referral/generate-message",
+        `${API_BASE}/api/referral/generate-message`,
         {
           from_name: fromName.trim(),
           recipient_name: recipientName.trim(),

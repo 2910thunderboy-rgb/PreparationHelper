@@ -1,78 +1,170 @@
 import express from "express";
 import dotenv from "dotenv";
-import helmet from "helmet";
-import userRoutes from "./routes/userRoutes.js";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import axios from "axios";
-import http from "http";
 import multer from "multer";
 import FormData from "form-data";
-import connectDB from "./config/db.js";
-import User from "./models/userModel.js";
-import { optionalAuth } from "./middlewares/optionalAuthMiddleware.js";
-import { decryptField } from "./utils/fieldEncryption.js";
 
 dotenv.config();
 const PORT = process.env.PORT || 3000;
 
-connectDB();
+console.log("[APP] Starting Career AI Backend...");
+console.log("[ENV] NODE_ENV:", process.env.NODE_ENV);
+console.log("[ENV] PORT:", PORT);
+console.log("[ENV] MONGO_URI exists:", !!process.env.MONGO_URI);
+console.log("[ENV] JWT_SECRET exists:", !!process.env.JWT_SECRET);
 
 const app = express();
 
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
-  })
-);
+// Initialize database connection asynchronously (non-blocking)
+let dbReady = false;
+let dbError = null;
 
-app.use(
-  cors({
-    origin: "http://localhost:5173",
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+console.log("[DB] Attempting connection...");
+(async () => {
+  try {
+    console.log("[DB] Importing connectDB function...");
+    const { default: connectDB } = await import("./config/db.js");
+    console.log("[DB] Calling connectDB()...");
+    const result = await connectDB();
+    dbReady = result;
+    console.log("[DB] Connection result:", result);
+    if (result) {
+      console.log("[DB] ✅ Connected successfully");
+    } else {
+      console.log("[DB] ⚠️  Connection returned false");
+      dbError = "Connection function returned false";
+    }
+  } catch (err) {
+    dbReady = false;
+    dbError = err.message;
+    console.error("[DB] ❌ Connection failed:", err.message);
+    console.error("[DB] Stack trace:", err.stack);
+  }
+})();
 
+// CORS configuration
+const corsOptions = {
+  origin: ["https://career-ai-frontend-mu.vercel.app", "http://localhost:5173", "http://localhost:3000"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+  exposedHeaders: ["Content-Length"],
+  maxAge: 86400,
+  preflightContinue: false,
+  optionsSuccessStatus: 200,
+};
+
+console.log("[CORS] Setting up CORS middleware...");
+// CORS must be FIRST
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+console.log("[CORS] ✅ CORS middleware applied");
+
+// Custom CORS headers
+app.use((req, res, next) => {
+  console.log(`[HTTP] ${req.method} ${req.path}`);
+  const origin = req.headers.origin;
+  const allowedOrigins = ["https://career-ai-frontend-mu.vercel.app", "http://localhost:5173", "http://localhost:3000"];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
+    res.header("Access-Control-Max-Age", "86400");
+  }
+  
+  if (req.method === "OPTIONS") {
+    console.log("[HTTP] ✅ OPTIONS request handled");
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+console.log("[MIDDLEWARE] Setting up body parser and cookies...");
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
+console.log("[MIDDLEWARE] ✅ Body parser and cookies configured");
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
 });
 
-app.use("/api/users", userRoutes);
-
-app.post("/api/analyze-resume", (req, res) => {
-  const proxy = http.request(
-    {
-      hostname: "127.0.0.1",
-      port: 8000,
-      path: "/analyze-resume/",
-      method: "POST",
-      headers: {
-        ...req.headers,
-        host: "127.0.0.1:8000",
-      },
-    },
-    (proxyRes) => {
-      res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
-      proxyRes.pipe(res);
-    }
-  );
-
-  proxy.on("error", (err) => {
-    console.error("Proxy error to analyze-resume", err);
-    res.status(502).json({
-      error:
-        "Analyze resume service unavailable - run backend-Py at port 8000",
-    });
+// Health check endpoint
+app.get("/", (req, res) => {
+  console.log("[HEALTH] Root health check");
+  res.json({ 
+    status: "ok", 
+    message: "Backend is running", 
+    dbReady,
+    dbError,
+    timestamp: new Date().toISOString()
   });
+});
 
-  req.pipe(proxy);
+app.get("/health", (req, res) => {
+  console.log("[HEALTH] /health endpoint called");
+  const statusCode = dbReady ? 200 : 503;
+  res.status(statusCode).json({ 
+    status: dbReady ? "ok" : "db_connecting", 
+    dbReady,
+    dbError,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Load routes after app is initialized
+console.log("[ROUTES] Loading userRoutes...");
+(async () => {
+  try {
+    console.log("[ROUTES] Starting async import...");
+    const userRoutesModule = await import("./routes/userRoutes.js");
+    console.log("[ROUTES] userRoutes module imported, type:", typeof userRoutesModule);
+    const userRoutes = userRoutesModule.default;
+    console.log("[ROUTES] userRoutes extracted, type:", typeof userRoutes);
+    app.use("/api/users", userRoutes);
+    console.log("[ROUTES] ✅ userRoutes loaded successfully");
+  } catch (err) {
+    console.error("[ROUTES] ❌ Failed to load userRoutes:", err.message);
+    console.error("[ROUTES] Error name:", err.name);
+    console.error("[ROUTES] Stack trace:", err.stack);
+    // Fallback route
+    app.use("/api/users", (req, res) => {
+      res.status(503).json({ error: "User routes not initialized", message: err.message });
+    });
+  }
+})();
+
+app.post("/api/analyze-resume", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "file is required" });
+    }
+    const form = new FormData();
+    form.append("file", req.file.buffer, {
+      filename: req.file.originalname || "resume.pdf",
+      contentType: req.file.mimetype || "application/pdf",
+    });
+
+    const response = await axios.post(
+      "https://career-ai-py.vercel.app/analyze-resume/",
+      form,
+      {
+        headers: form.getHeaders(),
+        timeout: 300000,
+      }
+    );
+
+    res.status(response.status).json(response.data);
+  } catch (err) {
+    console.error("Error analyzing resume", err);
+    res.status(502).json({
+      error: "Analyze resume service unavailable",
+    });
+  }
 });
 
 app.post("/api/resume/tailor-latex", upload.single("file"), async (req, res) => {
@@ -88,7 +180,7 @@ app.post("/api/resume/tailor-latex", upload.single("file"), async (req, res) => 
     form.append("job_description", req.body.job_description || "");
 
     const response = await axios.post(
-      "http://127.0.0.1:8000/resume/tailor-latex",
+      "https://career-ai-py.vercel.app/resume/tailor-latex",
       form,
       {
         headers: form.getHeaders(),
@@ -138,7 +230,7 @@ app.post("/api/interview-evaluate", async (req, res) => {
 app.post("/api/referral/generate-message", async (req, res) => {
   try {
     const response = await axios.post(
-      "http://127.0.0.1:8000/referral/generate-message",
+      "https://career-ai-py.vercel.app/referral/generate-message",
       req.body,
       {
         headers: { "Content-Type": "application/json" },
@@ -163,7 +255,7 @@ app.post("/api/referral/linkedin-mutuals", optionalAuth, async (req, res) => {
       body.linkedin_password = creds.password;
     }
     const response = await axios.post(
-      "http://127.0.0.1:8000/referral/linkedin-mutuals",
+      "https://career-ai-py.vercel.app/referral/linkedin-mutuals",
       body,
       {
         headers: { "Content-Type": "application/json" },
@@ -182,7 +274,7 @@ app.post("/api/referral/linkedin-mutuals", optionalAuth, async (req, res) => {
   }
 });
 
-const PY_API = "http://127.0.0.1:8000";
+const PY_API = "https://career-ai-py.vercel.app";
 
 async function fetchJsearchJobs(keywords, location) {
   const { data } = await axios.get(`${PY_API}/job-recommendations`, {
@@ -321,6 +413,31 @@ app.get("/job-recommendations", optionalAuth, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log("Server listening on port: " + PORT);
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error("[ERROR] Unhandled error:", err);
+  console.error("[ERROR] Path:", req.path);
+  console.error("[ERROR] Method:", req.method);
+  console.error("[ERROR] Stack:", err.stack);
+  
+  res.status(err.status || 500).json({
+    error: err.message || "Internal server error",
+    timestamp: new Date().toISOString(),
+    path: req.path,
+  });
 });
+
+// 404 handler
+app.use((req, res) => {
+  console.warn("[404] Route not found:", req.method, req.path);
+  res.status(404).json({
+    error: "Route not found",
+    path: req.path,
+    method: req.method,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+console.log("[APP] ✅ All middleware configured, app ready for requests");
+
+export default app;

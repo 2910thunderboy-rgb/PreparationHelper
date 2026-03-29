@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import axios from "axios";
 import { motion } from "framer-motion";
+import { API_BASE } from "@/lib/utils";
 import {
   ArrowLeft,
   Briefcase,
@@ -104,7 +105,7 @@ const JobRecommendations = () => {
       setFromCache(false);
       setLoading(true);
       try {
-        const res = await axios.get("http://localhost:3000/job-recommendations", {
+        const res = await axios.get(`${API_BASE}/job-recommendations`, {
           params: { keywords, location },
           withCredentials: true,
         });

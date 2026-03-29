@@ -10,6 +10,7 @@ import {
   LogOut,
 } from "lucide-react";
 import axios from 'axios';
+import { API_BASE } from "@/lib/utils";
 
 import {
   Sidebar,
@@ -76,7 +77,7 @@ export default function AppSidebar() {
   
   const handleLogout = async () => {
     try {
-      await axios.post('http://localhost:3000/api/users/logout', {}, { withCredentials: true });
+      await axios.post(`${API_BASE}/api/users/logout`, {}, { withCredentials: true });
       localStorage.removeItem('authToken');
       localStorage.removeItem('user');
       navigate('/');
