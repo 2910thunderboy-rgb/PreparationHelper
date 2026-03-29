@@ -74,7 +74,10 @@ app.get("/health", (req, res) => {
 app.get("/db-ready", (req, res) => {
   const nodeEnv = process.env.NODE_ENV || "(undefined)";
   const mongoUri = process.env.MONGO_URI ? "set" : "missing";
-  res.status(200).json({ dbReady, nodeEnv, mongoUri });
+  const uriLength = process.env.MONGO_URI ? process.env.MONGO_URI.length : 0;
+  const uriEndsWithNewline = process.env.MONGO_URI ? process.env.MONGO_URI.endsWith('\n') : false;
+  console.log("[DEBUG] MONGO_URI length:", uriLength, "ends with newline:", uriEndsWithNewline);
+  res.status(200).json({ dbReady, nodeEnv, mongoUri, uriLength, uriEndsWithNewline });
 });
 
 // Mount user routes before proxies
