@@ -3,6 +3,9 @@ import re
 import json
 import shutil
 import tempfile
+import base64
+import subprocess
+import uuid
 import requests
 import pdfplumber
 import pytesseract
@@ -10,7 +13,7 @@ from pdf2image import convert_from_path
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, Form, Body, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
+from typing import Optional, Tuple
 from datetime import datetime
 import google.generativeai as genai
 from bs4 import BeautifulSoup
@@ -253,9 +256,9 @@ def _linkedin_has_session_cookie(driver) -> bool:
 
 
 def _linkedin_headless_enabled() -> bool:
-    """Default false: visible Chrome survives checkpoints; set LINKEDIN_HEADLESS=true for servers."""
-    v = (os.getenv("LINKEDIN_HEADLESS") or "false").strip().lower()
-    return v in ("1", "true", "yes", "on")
+    """Default true (unattended). Set LINKEDIN_HEADLESS=false for a visible browser when debugging."""
+    v = (os.getenv("LINKEDIN_HEADLESS") or "true").strip().lower()
+    return v not in ("0", "false", "no", "off")
 
 
 def _linkedin_save_session_cookies(driver, path: str) -> None:
@@ -1295,6 +1298,127 @@ def _parse_people_search_cards(driver):
     return results[:40]
 
 
+def _strip_latex_code_fences(text: str) -> str:
+    t = text.strip()
+    if t.startswith("```"):
+        lines = t.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        t = "\n".join(lines)
+    return t.strip()
+
+
+def _find_technical_skills_block(tex: str):
+    """Split TeX into (prefix through section header, old body, suffix)."""
+    m = re.search(
+        r"(\\section\*?\{Technical Skills\}[^\n]*\n)(.*?)(?=\n\\section|\Z)",
+        tex,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not m:
+        return None
+    before = tex[: m.start(2)]
+    old_body = m.group(2)
+    after = tex[m.end(2) :]
+    return before, old_body, after
+
+
+def _fallback_skills_latex_from_jd(job_description: str, original_body: str) -> str:
+    lines = [l.strip() for l in (job_description or "").splitlines() if l.strip()][:12]
+    if not lines:
+        return original_body
+    items = []
+    for l in lines:
+        safe = l[:120].replace("\\", "\\textbackslash{}").replace("&", "\\&").replace("%", "\\%")
+        items.append(f"    \\item {safe}")
+    return "\\begin{itemize}\n" + "\n".join(items) + "\n\\end{itemize}\n"
+
+
+def _gemini_technical_skills_body(job_description: str, original_body: str) -> str:
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key or api_key == "your_google_gemini_api_key_here":
+        return _fallback_skills_latex_from_jd(job_description, original_body)
+    try:
+        model_name = get_available_model() or "gemini-1.5-flash"
+        model = genai.GenerativeModel(model_name)
+        prompt = (
+            "Output ONLY valid LaTeX for the body of the Technical Skills section. "
+            "Do NOT include \\section or document preamble. "
+            "Align skills with the job description; keep similar structure to the original (e.g. itemize). "
+            "Escape LaTeX special characters properly.\n\n"
+            f"Job description:\n{(job_description or '')[:12000]}\n\n"
+            f"Original section body:\n{original_body[:8000]}\n"
+        )
+        resp = model.generate_content(prompt)
+        out = (resp.text or "").strip()
+        return _strip_latex_code_fences(out)
+    except Exception as e:
+        print(f"Gemini technical skills error: {e}")
+        return _fallback_skills_latex_from_jd(job_description, original_body)
+
+
+def _pdflatex_bytes(tex_content: str) -> Tuple[Optional[bytes], Optional[str]]:
+    work = tempfile.mkdtemp()
+    try:
+        tid = uuid.uuid4().hex[:10]
+        tex_path = os.path.join(work, f"cv_{tid}.tex")
+        with open(tex_path, "w", encoding="utf-8") as f:
+            f.write(tex_content)
+        binary = shutil.which("pdflatex")
+        if not binary:
+            return None, "pdflatex not found on server PATH (install MacTeX/TeX Live)."
+        base = os.path.basename(tex_path)
+        for _ in range(2):
+            subprocess.run(
+                [binary, "-interaction=nonstopmode", "-halt-on-error", base],
+                cwd=work,
+                capture_output=True,
+                timeout=120,
+            )
+        pdf_path = os.path.join(work, base.replace(".tex", ".pdf"))
+        if os.path.isfile(pdf_path):
+            with open(pdf_path, "rb") as f:
+                return f.read(), None
+        return None, "LaTeX compile failed; check .tex for errors."
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+@app.post("/resume/tailor-latex")
+async def resume_tailor_latex(
+    file: UploadFile = File(...),
+    job_description: str = Form(""),
+):
+    raw = await file.read()
+    try:
+        tex = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        tex = raw.decode("latin-1", errors="replace")
+
+    parsed = _find_technical_skills_block(tex)
+    if not parsed:
+        return {
+            "error": (
+                "Could not find \\\\section{Technical Skills} (or \\\\section*{Technical Skills}). "
+                "Add that exact section title to your .tex file."
+            )
+        }
+    before, old_body, after = parsed
+    new_body = _gemini_technical_skills_body(job_description, old_body)
+    new_tex = before + new_body.strip() + "\n" + after
+
+    pdf_bytes, pdf_err = _pdflatex_bytes(new_tex)
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii") if pdf_bytes else None
+
+    return {
+        "latex": new_tex,
+        "pdf_base64": pdf_b64,
+        "pdf_error": pdf_err,
+    }
+
+
 @app.post("/referral/linkedin-mutuals")
 async def referral_linkedin_mutuals(request: Request):
     try:
@@ -1314,12 +1438,16 @@ async def referral_linkedin_mutuals(request: Request):
                 "Add it to backend-Py/linkedin_company_ids.json."
             ),
         }
-    username = LINKEDIN_USERNAME or os.getenv("LINKEDIN_USERNAME")
-    password = LINKEDIN_PASSWORD or os.getenv("LINKEDIN_PASSWORD")
+    username = (data.get("linkedin_username") or data.get("linkedinUsername") or "").strip()
+    password = (data.get("linkedin_password") or data.get("linkedinPassword") or "").strip()
+    if not username:
+        username = LINKEDIN_USERNAME or os.getenv("LINKEDIN_USERNAME") or ""
+    if not password:
+        password = LINKEDIN_PASSWORD or os.getenv("LINKEDIN_PASSWORD") or ""
     if not username or not password:
         return {
             "connections": [],
-            "error": "Set LINKEDIN_USERNAME and LINKEDIN_PASSWORD in backend-Py .env",
+            "error": "LinkedIn credentials required: save them in Profile (encrypted) or set LINKEDIN_* in backend-Py .env",
         }
     driver, err = _linkedin_acquire_driver(username, password)
     if err:

@@ -6,6 +6,7 @@ import {
   BrainCog,
   BookOpen,
   UserPlus,
+  User,
   LogOut,
 } from "lucide-react";
 import axios from 'axios';
@@ -53,6 +54,11 @@ const mainItems = [
     url: "/app/referral",
     icon: UserPlus,
   },
+  {
+    title: "Profile",
+    url: "/app/profile",
+    icon: User,
+  },
 ];
 
 import {Link , useLocation, useNavigate} from 'react-router-dom';
@@ -60,6 +66,7 @@ import {Link , useLocation, useNavigate} from 'react-router-dom';
 function isNavActive(pathname, item) {
   if (item.url === "/app/notes") return pathname.startsWith("/app/notes");
   if (item.url === "/app/referral") return pathname.startsWith("/app/referral");
+  if (item.url === "/app/profile") return pathname.startsWith("/app/profile");
   return pathname === item.url;
 }
 

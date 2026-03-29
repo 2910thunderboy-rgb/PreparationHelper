@@ -18,8 +18,11 @@
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "express-async-handler": "^1.2.0",
+    "form-data": "^4.0.0",
+    "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.13.2"
+    "mongoose": "^8.13.2",
+    "multer": "^2.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

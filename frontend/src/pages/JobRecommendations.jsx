@@ -106,6 +106,7 @@ const JobRecommendations = () => {
       try {
         const res = await axios.get("http://localhost:3000/job-recommendations", {
           params: { keywords, location },
+          withCredentials: true,
         });
         const list = Array.isArray(res.data.jobs) ? res.data.jobs : [];
         setNotice(typeof res.data.notice === "string" ? res.data.notice : null);
@@ -208,7 +209,7 @@ const JobRecommendations = () => {
               )}
               {!loading && !fromCache && source && jobs.length > 0 && (
                 <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200/90">
-                  Source: {source === "jsearch" ? "JSearch backup" : source === "linkedin" ? "LinkedIn" : source}
+                  Mix: {source}
                 </span>
               )}
             </div>
@@ -325,6 +326,11 @@ const JobRecommendations = () => {
                         <Sparkles className="h-3 w-3 text-violet-400/80" />
                         {job.job_employment_type || "Role"}
                       </span>
+                      {job._origin && (
+                        <span className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-1 text-[11px] text-cyan-200/90">
+                          {job._origin === "linkedin" ? "LinkedIn" : "API"}
+                        </span>
+                      )}
                       <span className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-black/25 px-2.5 py-1 text-zinc-400">
                         <Calendar className="h-3 w-3 text-zinc-500" />
                         {(() => {

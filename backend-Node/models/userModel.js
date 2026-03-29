@@ -16,6 +16,15 @@ const userSchema = mongoose.Schema(
       type: String,
       required: true,
     },
+    /** AES-256-GCM ciphertext (base64); not plaintext */
+    linkedinUsernameEnc: {
+      type: String,
+      default: "",
+    },
+    linkedinPasswordEnc: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,
@@ -23,13 +32,12 @@ const userSchema = mongoose.Schema(
 )
 
 userSchema.pre("save", async function (next) {
-  if (!this.isModified()) {
-    next()
+  if (!this.isModified("password")) {
+    return next()
   }
-
   const salt = await bcrypt.genSalt(10)
-
   this.password = await bcrypt.hash(this.password, salt)
+  next()
 })
 
 userSchema.methods.matchPassword = async function (enteredPassword) {
@@ -37,5 +45,4 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 }
 
 const User = mongoose.model("User", userSchema)
-
 export default User

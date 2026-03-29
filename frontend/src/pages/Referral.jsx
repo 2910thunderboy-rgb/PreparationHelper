@@ -76,6 +76,7 @@ export default function Referral() {
         {
           headers: { "Content-Type": "application/json" },
           timeout: 120000,
+          withCredentials: true,
         }
       );
       if (res.data?.error) {
@@ -117,7 +118,10 @@ export default function Referral() {
           company_name: companyName.trim(),
           tone,
         },
-        { headers: { "Content-Type": "application/json" } }
+        {
+          headers: { "Content-Type": "application/json" },
+          withCredentials: true,
+        }
       );
       if (res.data?.error) {
         setError(res.data.error);
