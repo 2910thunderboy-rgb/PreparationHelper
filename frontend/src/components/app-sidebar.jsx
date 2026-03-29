@@ -87,7 +87,9 @@ export default function AppSidebar() {
           {/* Logo */}
           <div className="flex items-center gap-2 px-4 py-4 mb-4">
             
-            <span className="font-semibold text-white">Finally Placed</span>
+            <span className="font-semibold text-white">
+              Career<span className="text-violet-400">.ai</span>
+            </span>
           </div>
           
           {/* Main menu */}

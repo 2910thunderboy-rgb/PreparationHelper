@@ -234,6 +234,152 @@ LINKEDIN_USERNAME = os.getenv("LINKEDIN_USERNAME")
 LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
 
 
+def _linkedin_cookie_file_path() -> str:
+    custom = os.getenv("LINKEDIN_COOKIE_FILE")
+    if custom:
+        return os.path.expanduser(custom)
+    return os.path.join(os.path.dirname(__file__), ".linkedin_session_cookies.json")
+
+
+def _linkedin_has_session_cookie(driver) -> bool:
+    """LinkedIn sets `li_at` when a logged-in session is active."""
+    try:
+        for c in driver.get_cookies():
+            if c.get("name") == "li_at" and c.get("value"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _linkedin_headless_enabled() -> bool:
+    """Default false: visible Chrome survives checkpoints; set LINKEDIN_HEADLESS=true for servers."""
+    v = (os.getenv("LINKEDIN_HEADLESS") or "false").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _linkedin_save_session_cookies(driver, path: str) -> None:
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(driver.get_cookies(), f)
+    except Exception as e:
+        print(f"Could not save LinkedIn session cookies: {e}")
+
+
+def _linkedin_load_session_cookies(driver, path: str) -> bool:
+    import time
+
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cookies = json.load(f)
+        driver.get("https://www.linkedin.com/")
+        time.sleep(1)
+        for c in cookies:
+            try:
+                nc = {"name": c["name"], "value": c["value"]}
+                if c.get("domain"):
+                    nc["domain"] = c["domain"]
+                if c.get("path"):
+                    nc["path"] = c["path"]
+                if c.get("expiry"):
+                    nc["expiry"] = int(c["expiry"])
+                driver.add_cookie(nc)
+            except Exception:
+                continue
+        return True
+    except Exception as e:
+        print(f"Could not load LinkedIn session cookies: {e}")
+        return False
+
+
+def _linkedin_acquire_driver(username: str, password: str):
+    """Return (driver, None) on success. Reuses saved cookies when still valid."""
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+    import time
+
+    headless = _linkedin_headless_enabled()
+    options = webdriver.ChromeOptions()
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument(
+        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    try:
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"},
+        )
+    except Exception:
+        pass
+
+    cookie_path = _linkedin_cookie_file_path()
+
+    try:
+        if os.path.isfile(cookie_path):
+            if _linkedin_load_session_cookies(driver, cookie_path):
+                driver.get("https://www.linkedin.com/feed/")
+                time.sleep(4)
+                if _linkedin_has_session_cookie(driver):
+                    return driver, None
+
+        driver.get("https://www.linkedin.com/login")
+        time.sleep(2)
+        driver.find_element(By.ID, "username").send_keys(username)
+        driver.find_element(By.ID, "password").send_keys(password)
+        driver.find_element(By.XPATH, "//button[@type='submit']").click()
+
+        max_wait = 50 if headless else 180
+        poll = 2.0
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            if _linkedin_has_session_cookie(driver):
+                _linkedin_save_session_cookies(driver, cookie_path)
+                return driver, None
+            cur = (driver.current_url or "").lower()
+            if not headless and ("checkpoint" in cur or "challenge" in cur or "login" in cur):
+                time.sleep(poll)
+                continue
+            time.sleep(poll)
+
+        if _linkedin_has_session_cookie(driver):
+            _linkedin_save_session_cookies(driver, cookie_path)
+            return driver, None
+
+        cur = (driver.current_url or "").lower()
+        driver.quit()
+        hint = (
+            "LinkedIn did not return a session. Use a visible browser (default: LINKEDIN_HEADLESS=false or unset), "
+            "complete any checkpoint in Chrome, then retry. Sessions are saved to .linkedin_session_cookies.json."
+        )
+        if headless and ("checkpoint" in cur or "challenge" in cur):
+            hint = (
+                "LinkedIn showed a security checkpoint in headless mode. "
+                "Unset LINKEDIN_HEADLESS or set LINKEDIN_HEADLESS=false, restart the API, complete verification once; "
+                "the session is saved for jobs and mutual connections."
+            )
+        return None, hint
+    except Exception as e:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        return None, str(e)
+
+
 def _linkedin_job_id_from_url(url: str) -> Optional[str]:
     if not url:
         return None
@@ -304,33 +450,14 @@ async def get_linkedin_jobs(request: Request):
     if not username or not password:
         return {"error": "LinkedIn credentials not configured; set LINKEDIN_USERNAME and LINKEDIN_PASSWORD environment variables."}
 
+    driver = None
     try:
-        from selenium import webdriver
         from selenium.webdriver.common.by import By
-        from selenium.webdriver.chrome.service import Service
-        from webdriver_manager.chrome import ChromeDriverManager
         import time
 
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-        driver.get("https://www.linkedin.com/login")
-        time.sleep(2)
-
-        username_el = driver.find_element(By.ID, "username")
-        password_el = driver.find_element(By.ID, "password")
-        username_el.send_keys(username)
-        password_el.send_keys(password)
-        driver.find_element(By.XPATH, "//button[@type='submit']").click()
-        time.sleep(10)  # Increased wait time for login
-
-        # Check if login succeeded
-        if "login" in driver.current_url.lower() or "checkpoint" in driver.current_url.lower():
-            driver.quit()
-            return {"error": "LinkedIn login failed. Check credentials or account status."}
+        driver, login_err = _linkedin_acquire_driver(username, password)
+        if login_err:
+            return {"error": login_err}
 
         search_url = f"https://www.linkedin.com/jobs/search/?keywords={keywords.replace(' ', '%20')}&location={location.replace(' ', '%20')}"
         driver.get(search_url)
@@ -752,10 +879,15 @@ async def get_linkedin_jobs(request: Request):
                     print(f"Fallback anchor parse failed: {e}")
                     continue
 
-        driver.quit()
         return {"jobs": jobs}
     except Exception as e:
         return {"error": f"LinkedIn scraping failed: {str(e)}"}
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
 
 @app.post("/interview/evaluate")
@@ -962,146 +1094,204 @@ def _load_linkedin_company_ids():
         return {}
 
 
-def _linkedin_has_session_cookie(driver) -> bool:
-    """LinkedIn sets `li_at` when a logged-in session is active."""
-    try:
-        for c in driver.get_cookies():
-            if c.get("name") == "li_at" and c.get("value"):
-                return True
-    except Exception:
-        pass
-    return False
+def _linkedin_is_plausible_person_name(t: str) -> bool:
+    if not t or len(t) < 2:
+        return False
+    lower = t.strip().lower()
+    if lower in (
+        "message",
+        "connect",
+        "follow",
+        "more",
+        "save",
+        "linkedin",
+        "1st",
+        "2nd",
+        "3rd",
+    ):
+        return False
+    if lower.startswith("view ") or "mutual connection" in lower:
+        return False
+    return True
 
 
-def _linkedin_headless_enabled() -> bool:
-    v = (os.getenv("LINKEDIN_HEADLESS") or "true").strip().lower()
-    return v not in ("0", "false", "no", "off")
-
-
-def _linkedin_login_driver(username: str, password: str):
-    from selenium import webdriver
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
-    import time
-
-    headless = _linkedin_headless_enabled()
-    options = webdriver.ChromeOptions()
-    if headless:
-        options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument(
-        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+def _linkedin_profile_first_name_from_card(card, By):
+    """Extract the main profile name from a search result row (not mutual-connection mini-links)."""
+    title_selectors = (
+        ".entity-result__title-text a span[aria-hidden='true']",
+        ".entity-result__title-text span[aria-hidden='true']",
+        ".entity-result__title-text a",
+        ".entity-result__title-text",
+        "[data-view-name='search-result-entity-universal-template'] span[aria-hidden='true']",
+        "span[data-anonymize='person-name']",
+        "a[data-test-app-aware-link] span[aria-hidden='true']",
+        "a.app-aware-link span[aria-hidden='true']",
+        ".entity-result__universal-image ~ div a span",
     )
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
+    for sel in title_selectors:
+        try:
+            els = card.find_elements(By.CSS_SELECTOR, sel)
+            for el in els:
+                t = (el.text or "").strip()
+                if _linkedin_is_plausible_person_name(t) and not t.lower().startswith("linkedin"):
+                    return t
+        except Exception:
+            continue
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    # First profile /in/ link in row (main hit is usually first; skip company links)
     try:
-        driver.execute_cdp_cmd(
-            "Page.addScriptToEvaluateOnNewDocument",
-            {
-                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});",
-            },
-        )
+        links = card.find_elements(By.CSS_SELECTOR, "a[href*='/in/']")
+        for link in links:
+            href = (link.get_attribute("href") or "").lower()
+            if "/company/" in href or "/school/" in href:
+                continue
+            if "/feed" in href or "/overlay" in href:
+                continue
+            t = (link.text or "").strip()
+            if _linkedin_is_plausible_person_name(t):
+                return t
+            aria = (link.get_attribute("aria-label") or "").strip()
+            if aria:
+                # e.g. "View Vedant Kulkarni’s profile" / "Vedant Kulkarni"
+                for prefix in ("View ", "view "):
+                    if aria.startswith(prefix):
+                        aria = aria[len(prefix) :]
+                for suffix in (
+                    "’s profile",
+                    "'s profile",
+                    " profile",
+                    "’s LinkedIn profile",
+                ):
+                    if aria.endswith(suffix):
+                        aria = aria[: -len(suffix)].strip()
+                if _linkedin_is_plausible_person_name(aria):
+                    return aria
     except Exception:
         pass
+    return ""
 
-    try:
-        driver.get("https://www.linkedin.com/login")
-        time.sleep(2)
-        driver.find_element(By.ID, "username").send_keys(username)
-        driver.find_element(By.ID, "password").send_keys(password)
-        driver.find_element(By.XPATH, "//button[@type='submit']").click()
 
-        max_wait = 35 if headless else 150
-        poll = 2.0
-        deadline = time.time() + max_wait
-        while time.time() < deadline:
-            if _linkedin_has_session_cookie(driver):
-                return driver, None
-            cur = (driver.current_url or "").lower()
-            if not headless and ("checkpoint" in cur or "challenge" in cur or "login" in cur):
-                time.sleep(poll)
-                continue
-            time.sleep(poll)
-
-        if _linkedin_has_session_cookie(driver):
-            return driver, None
-
-        cur = (driver.current_url or "").lower()
-        driver.quit()
-        hint = (
-            "LinkedIn did not return a session after login. "
-            "If you see a security checkpoint or 2FA, set LINKEDIN_HEADLESS=false in backend-Py/.env, "
-            "restart the API, click Load connections again, and complete verification in the Chrome window within ~2 minutes. "
-            "Otherwise confirm LINKEDIN_USERNAME and LINKEDIN_PASSWORD work in a normal browser."
-        )
-        if headless and ("checkpoint" in cur or "challenge" in cur):
-            hint = (
-                "LinkedIn blocked automated login (checkpoint/challenge). "
-                "Set LINKEDIN_HEADLESS=false in backend-Py/.env, restart, then run Load connections and finish verification in the opened browser."
-            )
-        return None, hint
-    except Exception as e:
+def _linkedin_headline_from_card(card, By):
+    for sel in (
+        ".entity-result__primary-subtitle",
+        ".entity-result__secondary-subtitle",
+        "div[class*='entity-result__primary-subtitle']",
+        "div[class*='entity-result__secondary-subtitle']",
+        ".entity-result__summary",
+        "span.entity-result__summary--2-lines",
+    ):
         try:
-            driver.quit()
+            els = card.find_elements(By.CSS_SELECTOR, sel)
+            for el in els:
+                t = (el.text or "").strip()
+                if len(t) > 3:
+                    return t
         except Exception:
-            pass
-        return None, str(e)
+            continue
+    return ""
 
 
 def _parse_people_search_cards(driver):
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
     import time
 
     results = []
     seen = set()
-    for _ in range(6):
+
+    # Wait for results shell (LinkedIn is slow / lazy)
+    _result_hints = (
+        "li.reusable-search__result-container",
+        "div[data-chameleon-result-urn]",
+        ".entity-result",
+        "div[data-view-name='search-entity-result-universal-template']",
+        "ul.reusable-search__entity-result-list li",
+        "div[data-view-name='search-result-entity-universal-template']",
+    )
+    try:
+        WebDriverWait(driver, 25).until(
+            lambda d: any(
+                len(d.find_elements(By.CSS_SELECTOR, s)) > 0 for s in _result_hints
+            )
+        )
+    except Exception:
+        pass
+
+    for _ in range(10):
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1.0)
-    cards = driver.find_elements(By.CSS_SELECTOR, "li.reusable-search__result-container")
+        time.sleep(0.7)
+
+    card_selectors = [
+        "li.reusable-search__result-container",
+        "ul.reusable-search__entity-result-list > li",
+        "div[data-view-name='search-entity-result-universal-template']",
+        "div[data-chameleon-result-urn]",
+        ".search-results-container .entity-result",
+        "li.scaffold-layout__list-item",
+        ".entity-result",
+        "div.entity-result",
+    ]
+    cards = []
+    for sel in card_selectors:
+        try:
+            found = driver.find_elements(By.CSS_SELECTOR, sel)
+            if len(found) >= 1:
+                cards = found
+                print(f"[linkedin-mutuals] Using card selector {sel!r}: {len(cards)} nodes")
+                break
+        except Exception:
+            continue
+
+    # XPath: any list row that looks like a people hit (profile link inside)
     if not cards:
-        cards = driver.find_elements(By.CSS_SELECTOR, "div[data-chameleon-result-urn]")
-    if not cards:
-        cards = driver.find_elements(By.CSS_SELECTOR, ".entity-result")
+        try:
+            cards = driver.find_elements(
+                By.XPATH,
+                "//li[.//a[contains(@href,'/in/') and not(contains(@href,'/company'))]]"
+                " | //div[contains(@class,'entity-result')][.//a[contains(@href,'/in/')]]",
+            )
+            print(f"[linkedin-mutuals] XPath fallback: {len(cards)} nodes")
+        except Exception:
+            cards = []
+
     for card in cards:
         try:
-            name = ""
-            headline = ""
-            for sel in (
-                ".entity-result__title-text a span[aria-hidden='true']",
-                ".entity-result__title-text span",
-            ):
-                els = card.find_elements(By.CSS_SELECTOR, sel)
-                if els:
-                    t = els[0].text.strip()
-                    if t:
-                        name = t
-                        break
-            if not name:
-                for a in card.find_elements(By.CSS_SELECTOR, "a[href*='/in/'] span[aria-hidden='true']"):
-                    t = a.text.strip()
-                    if t:
-                        name = t
-                        break
-            for hsel in (
-                ".entity-result__primary-subtitle",
-                ".entity-result__secondary-subtitle",
-            ):
-                hel = card.find_elements(By.CSS_SELECTOR, hsel)
-                if hel:
-                    headline = hel[0].text.strip()
-                    break
+            name = _linkedin_profile_first_name_from_card(card, By)
+            headline = _linkedin_headline_from_card(card, By)
             if name and name.lower() not in seen:
                 seen.add(name.lower())
                 results.append({"name": name, "headline": headline or ""})
         except Exception:
             continue
+
+    # Last resort: unique profile links in main column (no container)
+    if not results:
+        try:
+            main = driver.find_elements(By.CSS_SELECTOR, "main")
+            root = main[0] if main else driver
+            links = root.find_elements(
+                By.CSS_SELECTOR, "a[href*='linkedin.com/in/'], a[href*='/in/']"
+            )
+            seen_href = set()
+            for link in links:
+                href = (link.get_attribute("href") or "").split("?")[0].rstrip("/")
+                if "/company/" in href or "/school/" in href:
+                    continue
+                if "/in/" not in href or len(href) < 28:
+                    continue
+                if href in seen_href:
+                    continue
+                seen_href.add(href)
+                t = (link.text or "").strip()
+                if _linkedin_is_plausible_person_name(t) and t.lower() not in seen:
+                    seen.add(t.lower())
+                    results.append({"name": t, "headline": ""})
+                if len(results) >= 40:
+                    break
+            print(f"[linkedin-mutuals] Link fallback collected {len(results)} names")
+        except Exception as e:
+            print(f"[linkedin-mutuals] Link fallback failed: {e}")
+
     return results[:40]
 
 
@@ -1131,7 +1321,7 @@ async def referral_linkedin_mutuals(request: Request):
             "connections": [],
             "error": "Set LINKEDIN_USERNAME and LINKEDIN_PASSWORD in backend-Py .env",
         }
-    driver, err = _linkedin_login_driver(username, password)
+    driver, err = _linkedin_acquire_driver(username, password)
     if err:
         return {"connections": [], "error": err}
     import time
@@ -1142,7 +1332,7 @@ async def referral_linkedin_mutuals(request: Request):
             f"?currentCompany=%5B%22{company_id}%22%5D&network=%5B%22F%22%5D&origin=FACETED_SEARCH"
         )
         driver.get(url)
-        time.sleep(6)
+        time.sleep(9)
         connections = _parse_people_search_cards(driver)
         return {"connections": connections, "error": None, "company_id_used": company_id}
     except Exception as e:

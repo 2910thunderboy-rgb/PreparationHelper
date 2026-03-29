@@ -1,24 +1,16 @@
-import React from 'react'
-import Navbar from '../components/Navbar'
-import Hero from './Hero'
-import FeaturesGrid from './Feature'
-import MeetingsShowcase from './Meeting'
-import ResumeAnalyzer from './ResumeAnalyzer'
-import PrivacyProtection from './PrivacyProtection'
-import Footer from './Footer'
+import React from "react";
+import Navbar from "../components/Navbar";
+import Hero from "./Hero";
+import Footer from "./Footer";
 
 function LandingPage() {
   return (
-    <>
+    <div className="min-h-screen bg-[#05040a] text-zinc-100">
       <Navbar />
       <Hero />
-      <FeaturesGrid />
-      <MeetingsShowcase/>
-      <ResumeAnalyzer/>
-      <PrivacyProtection/>
-      <Footer/>
-     </>
-  )
+      <Footer />
+    </div>
+  );
 }
 
-export default LandingPage
+export default LandingPage;

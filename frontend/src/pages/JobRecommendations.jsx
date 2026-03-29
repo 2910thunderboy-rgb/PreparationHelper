@@ -22,7 +22,7 @@ const DEFAULT_LOCATION = "India";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function cacheKey(keywords, location) {
-  return `finallyPlaced.jobRecommendations.v1|${keywords}|${location}`;
+  return `careerAi.jobRecommendations.v1|${keywords}|${location}`;
 }
 
 function readCachedJobs(keywords, location) {

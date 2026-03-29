@@ -315,7 +315,7 @@ export default function Interview() {
                         ? "bg-violet-600/60"
                         : "bg-zinc-600"
                   }`}
-                  title={`Question ${i + 1}`}
+                  aria-label={`Question ${i + 1}`}
                 />
               ))}
             </div>

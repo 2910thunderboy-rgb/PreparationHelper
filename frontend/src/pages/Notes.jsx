@@ -254,7 +254,7 @@ export default function Notes() {
                     style={{ height: "min(85vh, 920px)", minHeight: "520px" }}
                   >
                     <iframe
-                      title={`${activeTopic.title} — study notes`}
+                      title="Study notes PDF"
                       src={pdfSrc}
                       className="absolute inset-0 h-full w-full border-0"
                     />

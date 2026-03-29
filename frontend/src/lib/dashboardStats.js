@@ -1,8 +1,8 @@
-export const DASHBOARD_STATS_KEY = "finallyPlaced.dashboardStats";
+export const DASHBOARD_STATS_KEY = "careerAi.dashboardStats";
 
-const JOB_CACHE_KEY = "finallyPlaced.jobRecommendations.v1|Software Engineer|India";
+const JOB_CACHE_KEY = "careerAi.jobRecommendations.v1|Software Engineer|India";
 
-export const DASHBOARD_REFRESH_EVENT = "finally-placed-dashboard-refresh";
+export const DASHBOARD_REFRESH_EVENT = "career-ai-dashboard-refresh";
 
 function notifyDashboardRefresh() {
   window.dispatchEvent(new CustomEvent(DASHBOARD_REFRESH_EVENT));

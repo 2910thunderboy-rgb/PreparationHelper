@@ -91,7 +91,6 @@ export function RegisterForm(props) {
                     href="#"
                     className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
                   >
-                    Forgot your password?
                   </a>
                 </div>
                 <Input id="password" type="password" required  onChange={(e) => setPassword(e.target.value) }

@@ -10,14 +10,7 @@ import {
   Target,
   TrendingUp,
 } from "lucide-react";
-import {
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Line, LineChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import {
   DASHBOARD_REFRESH_EVENT,
   getCachedJobCount,
@@ -209,7 +202,7 @@ export default function Dashboard() {
           <motion.header variants={item} className="space-y-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-violet-500/25 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-200">
               <Sparkles className="h-3.5 w-3.5" aria-hidden />
-              Finally Placed · Your workspace
+              Career.ai · Your workspace
             </div>
             <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
               Welcome back, {name}
@@ -278,17 +271,6 @@ export default function Dashboard() {
                     <LineChart data={chartData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                       <XAxis dataKey="label" tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} />
                       <YAxis domain={[0, 100]} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={32} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "#18181b",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: "8px",
-                          fontSize: "12px",
-                        }}
-                        labelFormatter={(_, payload) =>
-                          payload?.[0]?.payload?.t ? `Session · ${payload[0].payload.t}` : "Session"
-                        }
-                      />
                       <Line
                         type="monotone"
                         dataKey="score"
