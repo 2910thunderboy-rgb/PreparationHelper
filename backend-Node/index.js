@@ -81,6 +81,47 @@ app.post("/api/interview-evaluate", async (req, res) => {
   }
 });
 
+app.post("/api/referral/generate-message", async (req, res) => {
+  try {
+    const response = await axios.post(
+      "http://127.0.0.1:8000/referral/generate-message",
+      req.body,
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 60000,
+      }
+    );
+    return res.json(response.data);
+  } catch (error) {
+    console.error("Error generating referral message:", error.message || error);
+    return res.status(500).json({
+      error: error.response?.data?.error || "Failed to generate referral message",
+    });
+  }
+});
+
+app.post("/api/referral/linkedin-mutuals", async (req, res) => {
+  try {
+    const response = await axios.post(
+      "http://127.0.0.1:8000/referral/linkedin-mutuals",
+      req.body,
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 120000,
+      }
+    );
+    return res.json(response.data);
+  } catch (error) {
+    console.error("Error fetching LinkedIn mutuals:", error.message || error);
+    return res.status(500).json({
+      error:
+        error.response?.data?.error ||
+        error.message ||
+        "Failed to fetch LinkedIn mutual connections",
+    });
+  }
+});
+
 const PY_API = "http://127.0.0.1:8000";
 
 async function fetchJsearchJobs(keywords, location) {

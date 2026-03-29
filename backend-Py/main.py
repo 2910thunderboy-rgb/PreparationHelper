@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import shutil
 import tempfile
 import requests
@@ -836,6 +837,321 @@ async def evaluate_interview(request: Request):
         print(f"Gemini evaluation failed: {e}")
         rating, feedback = keyword_scoring(question, answer)
         return {"feedback": f"{feedback} (auto fallback due to Gemini error: {str(e)})", "rating": rating}
+
+
+def _referral_message_fallback(
+    recipient: str,
+    job_link: str,
+    resume_link: str,
+    company: str,
+    tone: str,
+    from_name: str = "",
+    job_id: str = "",
+) -> str:
+    co = company.strip() if company else "the team"
+    tone_note = "Warm but professional." if tone == "warm" else "Concise and direct." if tone == "concise" else "Professional and respectful."
+    signer = from_name.strip() if from_name and from_name.strip() else "[Your Name]"
+    job_id_note = (
+        f"\n\nIf helpful for internal tracking, the job requisition or posting ID I have is: {job_id.strip()}."
+        if job_id and job_id.strip()
+        else ""
+    )
+    return (
+        f"Hi {recipient},\n\n"
+        f"I hope you're well. I'm writing about a role I found ({job_link}) and believe my background could be a strong match.\n\n"
+        f"Here is my resume / portfolio for context: {resume_link}\n\n"
+        f"If you're open to it, I'd be grateful for a referral or any advice on applying at {co}. "
+        f"{tone_note}{job_id_note}\n\n"
+        f"Thank you for your time,\n{signer}"
+    )
+
+
+@app.post("/referral/generate-message")
+async def referral_generate_message(request: Request):
+    """Generate a referral / outreach message from job link, recipient name, and resume link."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {"error": "Invalid JSON body"}
+
+    job_link = (data.get("job_link") or "").strip()
+    recipient_name = (data.get("recipient_name") or data.get("name") or "").strip()
+    resume_link = (data.get("resume_link") or "").strip()
+    company_name = (data.get("company_name") or "").strip()
+    from_name = (data.get("from_name") or data.get("sender_name") or "").strip()
+    job_id = (data.get("job_id") or data.get("job_requisition_id") or "").strip()
+    tone = (data.get("tone") or "professional").strip().lower()
+    if tone not in ("professional", "warm", "concise"):
+        tone = "professional"
+
+    if not job_link or not recipient_name or not resume_link:
+        return {"error": "job_link, recipient_name, and resume_link are required"}
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key or api_key == "your_google_gemini_api_key_here":
+        return {
+            "message": _referral_message_fallback(
+                recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
+            ),
+            "source": "template",
+        }
+
+    try:
+        model_name = get_available_model() or "gemini-1.5-flash"
+        model = genai.GenerativeModel(model_name)
+        company_ctx = f" The company or team context is: {company_name}." if company_name else ""
+        sender_ctx = (
+            f"Sign the message with this exact name on the last line (not [Your Name]): {from_name}."
+            if from_name
+            else "End with a polite sign-off and the placeholder [Your Name] on its own line."
+        )
+        job_id_ctx = (
+            f"If a job requisition or posting ID was provided, mention it once briefly where natural: {job_id}."
+            if job_id
+            else "No job requisition ID was provided; do not invent one."
+        )
+        prompt = (
+            "You are helping a job seeker write a short LinkedIn-style message asking for a referral or warm introduction.\n"
+            "Requirements:\n"
+            "- Address the recipient by first name if only one name was given, otherwise use the full name naturally.\n"
+            "- Mention the job posting link naturally (do not invent details about the role).\n"
+            "- Include the resume/portfolio link once.\n"
+            "- Tone: "
+            + tone
+            + "."
+            + company_ctx
+            + "\n- "
+            + job_id_ctx
+            + "\n- Maximum ~180 words. No bullet points. Plain paragraphs.\n- "
+            + sender_ctx
+            + "\n\n"
+            f"Recipient name: {recipient_name}\n"
+            f"Sender sign-off name: {from_name or '[Your Name]'}\n"
+            f"Job posting URL: {job_link}\n"
+            f"Optional job / requisition ID: {job_id or '(none)'}\n"
+            f"Resume or portfolio URL: {resume_link}\n"
+        )
+        llm_response = model.generate_content(prompt)
+        text_output = ""
+        if hasattr(llm_response, "text") and llm_response.text:
+            text_output = llm_response.text
+        if not text_output:
+            text_output = _referral_message_fallback(
+                recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
+            )
+            return {"message": clean_gemini_output(text_output), "source": "template"}
+
+        return {"message": clean_gemini_output(text_output), "source": "ai"}
+    except Exception as e:
+        print(f"Referral message generation failed: {e}")
+        return {
+            "message": _referral_message_fallback(
+                recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
+            ),
+            "source": "template",
+            "notice": "AI unavailable; used a polished template instead.",
+        }
+
+
+def _load_linkedin_company_ids():
+    path = os.path.join(os.path.dirname(__file__), "linkedin_company_ids.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _linkedin_has_session_cookie(driver) -> bool:
+    """LinkedIn sets `li_at` when a logged-in session is active."""
+    try:
+        for c in driver.get_cookies():
+            if c.get("name") == "li_at" and c.get("value"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _linkedin_headless_enabled() -> bool:
+    v = (os.getenv("LINKEDIN_HEADLESS") or "true").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def _linkedin_login_driver(username: str, password: str):
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+    import time
+
+    headless = _linkedin_headless_enabled()
+    options = webdriver.ChromeOptions()
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument(
+        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    try:
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {
+                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});",
+            },
+        )
+    except Exception:
+        pass
+
+    try:
+        driver.get("https://www.linkedin.com/login")
+        time.sleep(2)
+        driver.find_element(By.ID, "username").send_keys(username)
+        driver.find_element(By.ID, "password").send_keys(password)
+        driver.find_element(By.XPATH, "//button[@type='submit']").click()
+
+        max_wait = 35 if headless else 150
+        poll = 2.0
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            if _linkedin_has_session_cookie(driver):
+                return driver, None
+            cur = (driver.current_url or "").lower()
+            if not headless and ("checkpoint" in cur or "challenge" in cur or "login" in cur):
+                time.sleep(poll)
+                continue
+            time.sleep(poll)
+
+        if _linkedin_has_session_cookie(driver):
+            return driver, None
+
+        cur = (driver.current_url or "").lower()
+        driver.quit()
+        hint = (
+            "LinkedIn did not return a session after login. "
+            "If you see a security checkpoint or 2FA, set LINKEDIN_HEADLESS=false in backend-Py/.env, "
+            "restart the API, click Load connections again, and complete verification in the Chrome window within ~2 minutes. "
+            "Otherwise confirm LINKEDIN_USERNAME and LINKEDIN_PASSWORD work in a normal browser."
+        )
+        if headless and ("checkpoint" in cur or "challenge" in cur):
+            hint = (
+                "LinkedIn blocked automated login (checkpoint/challenge). "
+                "Set LINKEDIN_HEADLESS=false in backend-Py/.env, restart, then run Load connections and finish verification in the opened browser."
+            )
+        return None, hint
+    except Exception as e:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        return None, str(e)
+
+
+def _parse_people_search_cards(driver):
+    from selenium.webdriver.common.by import By
+    import time
+
+    results = []
+    seen = set()
+    for _ in range(6):
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(1.0)
+    cards = driver.find_elements(By.CSS_SELECTOR, "li.reusable-search__result-container")
+    if not cards:
+        cards = driver.find_elements(By.CSS_SELECTOR, "div[data-chameleon-result-urn]")
+    if not cards:
+        cards = driver.find_elements(By.CSS_SELECTOR, ".entity-result")
+    for card in cards:
+        try:
+            name = ""
+            headline = ""
+            for sel in (
+                ".entity-result__title-text a span[aria-hidden='true']",
+                ".entity-result__title-text span",
+            ):
+                els = card.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    t = els[0].text.strip()
+                    if t:
+                        name = t
+                        break
+            if not name:
+                for a in card.find_elements(By.CSS_SELECTOR, "a[href*='/in/'] span[aria-hidden='true']"):
+                    t = a.text.strip()
+                    if t:
+                        name = t
+                        break
+            for hsel in (
+                ".entity-result__primary-subtitle",
+                ".entity-result__secondary-subtitle",
+            ):
+                hel = card.find_elements(By.CSS_SELECTOR, hsel)
+                if hel:
+                    headline = hel[0].text.strip()
+                    break
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                results.append({"name": name, "headline": headline or ""})
+        except Exception:
+            continue
+    return results[:40]
+
+
+@app.post("/referral/linkedin-mutuals")
+async def referral_linkedin_mutuals(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return {"connections": [], "error": "Invalid JSON"}
+    company_key = (data.get("company_key") or "").strip()
+    if not company_key:
+        return {"connections": [], "error": "company_key is required"}
+    ids_map = _load_linkedin_company_ids()
+    company_id = ids_map.get(company_key)
+    if not company_id:
+        return {
+            "connections": [],
+            "error": (
+                f"No LinkedIn company ID for '{company_key}'. "
+                "Add it to backend-Py/linkedin_company_ids.json."
+            ),
+        }
+    username = LINKEDIN_USERNAME or os.getenv("LINKEDIN_USERNAME")
+    password = LINKEDIN_PASSWORD or os.getenv("LINKEDIN_PASSWORD")
+    if not username or not password:
+        return {
+            "connections": [],
+            "error": "Set LINKEDIN_USERNAME and LINKEDIN_PASSWORD in backend-Py .env",
+        }
+    driver, err = _linkedin_login_driver(username, password)
+    if err:
+        return {"connections": [], "error": err}
+    import time
+
+    try:
+        url = (
+            "https://www.linkedin.com/search/results/people/"
+            f"?currentCompany=%5B%22{company_id}%22%5D&network=%5B%22F%22%5D&origin=FACETED_SEARCH"
+        )
+        driver.get(url)
+        time.sleep(6)
+        connections = _parse_people_search_cards(driver)
+        return {"connections": connections, "error": None, "company_id_used": company_id}
+    except Exception as e:
+        return {"connections": [], "error": str(e)}
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 
 # Optional: Run server directly
