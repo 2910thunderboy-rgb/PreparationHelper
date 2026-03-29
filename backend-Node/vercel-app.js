@@ -2,10 +2,24 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import axios from "axios";
+import connectDB from "./config/db.js";
+import userRoutes from "./routes/userRoutes.js";
 
 console.log("[VERCEL] Initializing Express app for serverless");
 
 const app = express();
+
+// Connect DB once per lambda instance
+let dbReady = false;
+(async () => {
+  try {
+    const result = await connectDB();
+    dbReady = result;
+    console.log("[VERCEL] DB Ready:", dbReady);
+  } catch (err) {
+    console.error("[VERCEL] DB connection failed:", err.message || err);
+  }
+})();
 
 // CORS configuration
 app.use(cors({
@@ -67,6 +81,9 @@ app.post("/api/users/logout", (req, res) => {
   });
   res.status(200).json({ message: "User logged out" });
 });
+
+// Mount user routes before proxies
+app.use("/api/users", userRoutes);
 
 // Proxy routes to Python backend
 const PYTHON_BASE =
