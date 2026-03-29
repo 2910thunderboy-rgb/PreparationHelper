@@ -1,17 +1,14 @@
 /**
- * Copies every PDF from project /Notes into frontend/public/notes/
- * and writes manifest.json for the Study notes page.
+ * Generates manifest.json for the Study notes page from PDFs in frontend/public/notes/
  *
  * Run automatically before dev/build, or manually: npm run sync-notes
  */
-import { readdir, copyFile, mkdir, writeFile, stat } from "fs/promises";
+import { readdir, writeFile, stat } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = join(__dirname, "..");
-const PROJECT_ROOT = join(FRONTEND_ROOT, "..");
-const NOTES_SRC = join(PROJECT_ROOT, "Notes");
 const NOTES_OUT = join(FRONTEND_ROOT, "public", "notes");
 
 function fileBaseId(base) {
@@ -37,14 +34,12 @@ function fileTitle(base, id) {
 }
 
 async function main() {
-  await mkdir(NOTES_OUT, { recursive: true });
-
   let files = [];
   try {
-    await stat(NOTES_SRC);
-    files = await readdir(NOTES_SRC);
+    await stat(NOTES_OUT);
+    files = await readdir(NOTES_OUT);
   } catch {
-    console.warn("[sync-notes] Folder not found (optional):", NOTES_SRC);
+    console.warn("[sync-notes] Folder not found:", NOTES_OUT);
     files = [];
   }
 
@@ -74,8 +69,6 @@ async function main() {
       path,
       filename,
     });
-
-    await copyFile(join(NOTES_SRC, filename), join(NOTES_OUT, filename));
   }
 
   const manifest = {
@@ -91,7 +84,7 @@ async function main() {
   );
 
   console.log(
-    `[sync-notes] ${topics.length} PDF(s) synced from Notes/ → public/notes/`
+    `[sync-notes] Generated manifest for ${topics.length} PDF(s) in public/notes/`
   );
 }
 
