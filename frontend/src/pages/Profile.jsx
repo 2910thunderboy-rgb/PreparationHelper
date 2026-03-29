@@ -98,6 +98,7 @@ export default function Profile() {
   };
 
   const saveApiKeys = async () => {
+    console.log("saveApiKeys called, user:", user);
     setApiErr(null);
     setApiMsg(null);
     try {
@@ -113,8 +114,13 @@ export default function Profile() {
           { withCredentials: true, headers: { "Content-Type": "application/json" } }
         );
         setApiMsg("API keys saved securely on the server (encrypted).");
-        setGeminiKey("");
-        setRapidKey("");
+        // Also save to localStorage for use in requests
+        if (geminiKey.trim()) {
+          localStorage.setItem("geminiApiKey", geminiKey.trim());
+        }
+        if (rapidKey.trim()) {
+          localStorage.setItem("rapidApiKey", rapidKey.trim());
+        }
       } else {
         // Save to localStorage
         if (geminiKey.trim()) {
