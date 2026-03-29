@@ -17,6 +17,7 @@ from typing import Optional, Tuple
 from datetime import datetime
 import google.generativeai as genai
 from bs4 import BeautifulSoup
+import concurrent.futures
 
 # Load environment variables (secrets only in backend-Py/.env — same idea as Node)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
@@ -102,37 +103,20 @@ def clean_gemini_output(text):
     return text.strip()
 
 def get_available_model():
-    """Dynamically find the best available Gemini model for generateContent"""
-    try:
-        models = genai.list_models()
-        # Filter models that support generateContent
-        available_models = []
-        for m in models:
-            if "generateContent" in m.supported_generation_methods:
-                available_models.append(m.name.replace("models/", ""))
-        
-        if available_models:
-            print(f"Available Gemini models: {available_models}")
-            # Prefer latest/fastest models
-            priority = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.5-pro-latest"]
-            for model_name in priority:
-                if model_name in available_models:
-                    print(f"Selected model: {model_name}")
-                    return model_name
-            # If no priority match, use first available
-            return available_models[0]
-        else:
-            return None
-    except Exception as e:
-        print(f"Error listing models: {e}")
-        return None
+    """Choose the default Gemini model (avoid slow model listing)."""
+    # Prefer model set in env for determinism; otherwise use a safe default.
+    default_model = os.getenv("GEMINI_MODEL") or "gemini-1.5-flash"
+    return default_model
 
-def analyze_resume_text(resume_text, job_description=None):
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key or api_key == "your_google_gemini_api_key_here":
-        return "❌ Resume analysis is not configured. Please set GOOGLE_API_KEY in .env file and restart the service."
+def analyze_resume_text(resume_text, job_description=None, api_key=None):
+    key = api_key or os.getenv("GOOGLE_API_KEY")
+    if not key or key == "your_google_gemini_api_key_here":
+        return "❌ Resume analysis is not configured. Please provide a Gemini API key in your profile or set GOOGLE_API_KEY in .env file."
     
     try:
+        # Configure with the provided key
+        genai.configure(api_key=key)
+        
         # Get the best available model dynamically
         model_name = get_available_model()
         
@@ -169,7 +153,7 @@ Resume:
         return f"❌ Failed to analyze resume: {str(e)}"
 
 @app.post("/analyze-resume/")
-async def analyze_resume_api(file: UploadFile = File(...), job_description: str = Form("")):
+async def analyze_resume_api(file: UploadFile = File(...), job_description: str = Form(""), gemini_api_key: str = Form(None)):
     try:
         temp_dir = tempfile.mkdtemp()
         file_path = os.path.join(temp_dir, file.filename)
@@ -182,7 +166,7 @@ async def analyze_resume_api(file: UploadFile = File(...), job_description: str 
             shutil.rmtree(temp_dir)
             return {"analysis": "❌ Could not extract text from PDF. Please ensure the file is a valid PDF with readable text."}
 
-        analysis = analyze_resume_text(resume_text, job_description)
+        analysis = analyze_resume_text(resume_text, job_description, gemini_api_key)
 
         shutil.rmtree(temp_dir)
         return {"analysis": analysis}
@@ -190,18 +174,135 @@ async def analyze_resume_api(file: UploadFile = File(...), job_description: str 
         print(f"Error in analyze_resume_api: {e}")
         return {"analysis": f"❌ Error processing resume: {str(e)}"}
 
-# ---------- Job Recommendations Logic ----------
-# app = FastAPI()
+def _scrape_linkedin_jobs(keywords: str, location: str) -> list:
+    """Scrape LinkedIn jobs if credentials are available."""
+    if not LINKEDIN_USERNAME or not LINKEDIN_PASSWORD:
+        return []
+    
+    driver = None
+    try:
+        from selenium.webdriver.common.by import By
+        import time
 
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:5173"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+        driver, login_err = _linkedin_acquire_driver(LINKEDIN_USERNAME, LINKEDIN_PASSWORD)
+        if login_err:
+            return []
 
-def _normalize_jsearch_job(job: dict) -> dict:
+        search_url = f"https://www.linkedin.com/jobs/search/?keywords={keywords.replace(' ', '%20')}&location={location.replace(' ', '%20')}"
+        driver.get(search_url)
+        time.sleep(5)
+
+        # Explicitly click the Jobs tab to ensure all jobs are loaded
+        try:
+            jobs_button = driver.find_element(By.XPATH, "//a[@data-link-to='jobs']/span")
+            jobs_button.click()
+            time.sleep(3)
+        except Exception:
+            pass
+
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+
+        # Scroll every matching list panel
+        list_scroll_selectors = [
+            "div.jobs-search-results-list",
+            "div.scaffold-layout__list",
+            "ul.scaffold-layout__list-container",
+            "ul.jobs-search-results__list",
+            "div.scaffold-layout__list-container",
+        ]
+        for _ in range(10):  # Reduced for speed
+            for sel in list_scroll_selectors:
+                try:
+                    for panel in driver.find_elements(By.CSS_SELECTOR, sel):
+                        try:
+                            driver.execute_script(
+                                "arguments[0].scrollTop = arguments[0].scrollHeight", panel
+                            )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+
+        # Simplified job extraction
+        job_cards = driver.find_elements(By.XPATH, "//ul[contains(@class,'jobs-search-results__list')]/li")
+        if not job_cards:
+            job_cards = driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class,'job-card-container') or contains(@class,'jobs-search-results__list-item')]",
+            )
+        if not job_cards:
+            job_cards = driver.find_elements(
+                By.CSS_SELECTOR,
+                "div.job-card-container, li.jobs-search-results__list-item",
+            )
+
+        jobs = []
+        seen_job_ids = set()
+
+        for card in job_cards[:20]:  # Limit to 20 jobs
+            try:
+                link_el = None
+                for xp in (
+                    ".//a[contains(@href,'/jobs/view')]",
+                    ".//a[contains(@href,'jobs/view')]",
+                ):
+                    try:
+                        link_el = card.find_element(By.XPATH, xp)
+                        break
+                    except Exception:
+                        continue
+                if link_el is None:
+                    continue
+                job_url = _absolute_linkedin_href(link_el.get_attribute("href") or "")
+                jid = _linkedin_job_id_from_url(job_url)
+                if jid and jid in seen_job_ids:
+                    continue
+                seen_job_ids.add(jid)
+
+                title_text = link_el.text.strip() or ""
+                company_text = ""
+                job_city = location
+
+                # Get company
+                try:
+                    company_el = card.find_element(By.XPATH, ".//h4[contains(@class,'company-name')] | .//span[contains(@class,'company-name')]")
+                    company_text = company_el.text.strip()
+                except Exception:
+                    pass
+
+                # Get location
+                try:
+                    location_el = card.find_element(By.XPATH, ".//span[contains(@class,'job-card-container__metadata-item')]")
+                    job_city = location_el.text.strip()
+                except Exception:
+                    pass
+
+                if title_text and company_text:
+                    jobs.append({
+                        "job_title": title_text,
+                        "job_employment_type": "Full-time",
+                        "job_company_name": company_text,
+                        "job_city": job_city,
+                        "job_country": "India",
+                        "job_posted_at_datetime_utc": datetime.utcnow().isoformat() + "Z",
+                        "job_apply_link": job_url,
+                    })
+            except Exception:
+                continue
+
+        return jobs
+    except Exception as e:
+        print(f"LinkedIn scraping failed: {e}")
+        return []
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
     """Map JSearch payload to the shape expected by the frontend."""
     if not isinstance(job, dict):
         return {}
@@ -235,16 +336,19 @@ def _normalize_jsearch_job(job: dict) -> dict:
 
 @app.get("/job-recommendations")
 def get_jobs(
+    request: Request,
     keywords: str = Query("Software Engineer"),
     location: str = Query("India"),
 ):
-    """Backup job feed via JSearch (RapidAPI). Used when LinkedIn scraping fails."""
-    key = os.getenv("RAPIDAPI_KEY")
+    """Job recommendations via JSearch (RapidAPI), with optional LinkedIn scraping."""
+    key = request.headers.get("X-RapidAPI-Key") or os.getenv("RAPIDAPI_KEY")
     if not key:
         return {
             "jobs": [],
-            "error": "RAPIDAPI_KEY is not set in backend-Py .env (optional backup for job listings).",
+            "error": "RAPIDAPI_KEY is not provided in header or set in backend-Py .env.",
         }
+    
+    # Always fetch from JSearch
     url = "https://jsearch.p.rapidapi.com/search"
     q = f"{keywords.strip()} in {location.strip()}".strip()
     querystring = {"query": q, "page": "1", "num_pages": "1"}
@@ -260,13 +364,31 @@ def get_jobs(
             return {"jobs": [], "error": str(msg)}
         raw = data.get("data") if isinstance(data, dict) else []
         jobs = [_normalize_jsearch_job(j) for j in (raw or [])]
-        return {"jobs": jobs}
     except Exception as e:
         return {"jobs": [], "error": str(e)}
+    
+    # Try to add LinkedIn jobs if scraper works
+    linkedin_jobs = []
+    try:
+        linkedin_jobs = _scrape_linkedin_jobs(keywords, location)
+        # Remove duplicates based on apply_link
+        existing_links = {j.get("job_apply_link") for j in jobs}
+        for lj in linkedin_jobs:
+            link = lj.get("job_apply_link")
+            if link and link not in existing_links:
+                jobs.append(lj)
+                existing_links.add(link)
+    except Exception as e:
+        # If LinkedIn fails, just continue with JSearch jobs
+        pass
+    
+    return {"jobs": jobs}
 
 # LinkedIn scraping route
 LINKEDIN_USERNAME = os.getenv("LINKEDIN_USERNAME")
 LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
+if LINKEDIN_PASSWORD:
+    LINKEDIN_PASSWORD = base64.b64decode(LINKEDIN_PASSWORD).decode()
 
 
 def _linkedin_cookie_file_path() -> str:
@@ -451,7 +573,70 @@ def _primary_job_title_line(text: str) -> str:
     return first
 
 
+def _normalize_rapidapi_job(job: dict) -> dict:
+    if not isinstance(job, dict):
+        return {}
+
+    location = ""
+    if isinstance(job.get("locations_derived"), list) and job.get("locations_derived"):
+        location = job.get("locations_derived")[0]
+    elif isinstance(job.get("locations_raw"), list) and job.get("locations_raw"):
+        loc_info = job.get("locations_raw")[0]
+        address = loc_info.get("address") if isinstance(loc_info, dict) else None
+        if address:
+            location = ", ".join(str(address.get(k, "")).strip() for k in ["addressLocality", "addressRegion", "addressCountry"] if address.get(k))
+
+    employment_type = job.get("employment_type")
+    if isinstance(employment_type, list):
+        employment_type = ", ".join(employment_type)
+
+    return {
+        "id": str(job.get("id", "")),
+        "job_title": str(job.get("title", "") or "").strip(),
+        "employer_name": str(job.get("organization", "") or job.get("source", "")).strip(),
+        "job_city": location,
+        "job_country": ", ".join(job.get("countries_derived", [])) if isinstance(job.get("countries_derived"), list) else "",
+        "job_employment_type": employment_type or "",
+        "job_posted_at_datetime_utc": str(job.get("date_posted", "")),
+        "job_apply_link": str(job.get("url", "")),
+        "source_type": str(job.get("source_type", "")),
+        "source_domain": str(job.get("source_domain", "")),
+        "description_text": str(job.get("description_text", "")),
+    }
+
+
+def fetch_rapidapi_linkedin_jobs(limit=100, offset=0, description_type="text"):
+    rapidapi_key = os.getenv("LINKEDIN_RAPIDAPI_KEY")
+    if not rapidapi_key:
+        return [], "Missing LINKEDIN_RAPIDAPI_KEY in environment"
+
+    url = f"https://linkedin-job-search-api.p.rapidapi.com/active-jb-1h?limit={limit}&offset={offset}&description_type={description_type}"
+    headers = {
+        "Content-Type": "application/json",
+        "x-rapidapi-host": "linkedin-job-search-api.p.rapidapi.com",
+        "x-rapidapi-key": rapidapi_key,
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        if resp.status_code != 200:
+            return [], f"RapidAPI error status {resp.status_code}: {resp.text}"
+
+        data = resp.json()
+        if not isinstance(data, list):
+            return [], "RapidAPI returned unexpected data format"
+
+        jobs = [_normalize_rapidapi_job(job) for job in data if isinstance(job, dict)]
+        return jobs, None
+    except Exception as e:
+        return [], f"RapidAPI request failed: {str(e)}"
+
+
 @app.post("/job-recommendations/linkedin")
+@app.put("/job-recommendations/linkedin")
+@app.get("/job-recommendations/linkedin")
+@app.put("/api/users/profile/linkedin")
+@app.get("/api/users/profile/linkedin")
 async def get_linkedin_jobs(request: Request):
     linkedin_username: Optional[str] = None
     linkedin_password: Optional[str] = None
@@ -482,8 +667,38 @@ async def get_linkedin_jobs(request: Request):
     username = linkedin_username or LINKEDIN_USERNAME
     password = linkedin_password or LINKEDIN_PASSWORD
 
-    if not username or not password:
-        return {"error": "LinkedIn credentials not configured; set LINKEDIN_USERNAME and LINKEDIN_PASSWORD environment variables."}
+    rapid_jobs, rapid_error = fetch_rapidapi_linkedin_jobs(limit=100, offset=0, description_type="text")
+    merged_jobs = list(rapid_jobs)
+    results_meta = {
+        "rapidapi_jobs": len(rapid_jobs),
+        "rapidapi_error": rapid_error,
+        "linkedin_scraped_jobs": 0,
+        "linkedin_note": "LinkedIn scrape disabled by default unless LINKEDIN_SCRAPE_ENABLED=true.",
+    }
+
+    if username and password and _env_flag("LINKEDIN_SCRAPE_ENABLED"):
+        # LinkedIn scraping is known to be fragile and heavy; keep disabled by default.
+        try:
+            # Implemented as optional fallback; this code path runs only with explicit enabling.
+            linkedin_jobs = []
+            # Placeholder for actual scraping logic that would append to linkedin_jobs.
+            # For now we return rapidapi jobs only, with metadata.
+            # linkedin_jobs = _perform_linkedin_scrape(username, password, keywords, location)
+            for lj in linkedin_jobs:
+                if lj.get("job_apply_link") and not any(j.get("job_apply_link") == lj.get("job_apply_link") for j in merged_jobs):
+                    merged_jobs.append(lj)
+            results_meta["linkedin_scraped_jobs"] = len(linkedin_jobs)
+            results_meta["linkedin_note"] = "LinkedIn scrape not executed, set up _perform_linkedin_scrape() to enable."
+        except Exception as e:
+            results_meta["linkedin_note"] = f"LinkedIn scraping failed: {str(e)}"
+    else:
+        # No credentials / no scrape flag -> continue with only rapidapi jobs.
+        pass
+
+    return {
+        "jobs": merged_jobs,
+        "meta": results_meta,
+    }
 
     driver = None
     try:
@@ -1054,13 +1269,14 @@ async def referral_generate_message(request: Request):
     if not job_link or not recipient_name or not resume_link:
         return {"error": "job_link, recipient_name, and resume_link are required"}
 
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = request.headers.get("X-Gemini-Api-Key") or data.get("gemini_api_key") or os.getenv("GOOGLE_API_KEY")
     if not api_key or api_key == "your_google_gemini_api_key_here":
         return {
             "message": _referral_message_fallback(
                 recipient_name, job_link, resume_link, company_name, tone, from_name, job_id
             ),
             "source": "template",
+            "notice": "Gemini API key is not configured; using template fallback.",
         }
 
     try:

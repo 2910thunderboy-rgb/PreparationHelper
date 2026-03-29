@@ -78,7 +78,8 @@ const PYTHON_BASE =
 console.log("[PROXY] PYTHON_BASE", PYTHON_BASE);
 
 const proxyRequest = async (req, res, pythonPath) => {
-  const targetUrl = `${PYTHON_BASE}${pythonPath}`;
+  const queryString = req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "";
+  const targetUrl = `${PYTHON_BASE}${pythonPath}${queryString}`;
   console.log(`[PROXY] ${req.method} ${req.originalUrl} -> ${targetUrl}`);
 
   const headers = { ...req.headers };

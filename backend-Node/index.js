@@ -5,6 +5,7 @@ import cors from "cors";
 import axios from "axios";
 import multer from "multer";
 import FormData from "form-data";
+import { decryptField } from "./utils/fieldEncryption.js";
 
 dotenv.config();
 const PORT = process.env.PORT || 3000;
@@ -227,11 +228,33 @@ app.post("/api/interview-evaluate", async (req, res) => {
   }
 });
 
-app.post("/api/referral/generate-message", async (req, res) => {
+app.post("/api/referral/generate-message", optionalAuth, async (req, res) => {
   try {
+    let geminiApiKey = process.env.GOOGLE_API_KEY || ""
+    let rapidApiKey = process.env.RAPIDAPI_KEY || ""
+
+    if (req.user) {
+      try {
+        geminiApiKey = decryptField(req.user.geminiApiKeyEnc) || geminiApiKey
+      } catch {
+        geminiApiKey = geminiApiKey
+      }
+      try {
+        rapidApiKey = decryptField(req.user.rapidApiKeyEnc) || rapidApiKey
+      } catch {
+        rapidApiKey = rapidApiKey
+      }
+    }
+
+    const body = {
+      ...req.body,
+      gemini_api_key: geminiApiKey,
+      rapidapi_key: rapidApiKey,
+    }
+
     const response = await axios.post(
       "https://career-ai-py.vercel.app/referral/generate-message",
-      req.body,
+      body,
       {
         headers: { "Content-Type": "application/json" },
         timeout: 60000,

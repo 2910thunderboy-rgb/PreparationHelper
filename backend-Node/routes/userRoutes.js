@@ -27,6 +27,11 @@ router
   .get(protect, getLinkedInStatus)
   .put(protect, updateLinkedInCredentials)
 
+router
+  .route("/profile/api-keys")
+  .get(protect, getApiKeys)
+  .put(protect, updateApiKeys)
+
 router.get("/get" ,(req,res) =>{
   res.send("backend working")
 })

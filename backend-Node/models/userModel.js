@@ -25,6 +25,15 @@ const userSchema = mongoose.Schema(
       type: String,
       default: "",
     },
+    /** AES-256-GCM ciphertext (base64); API keys */
+    geminiApiKeyEnc: {
+      type: String,
+      default: "",
+    },
+    rapidApiKeyEnc: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,

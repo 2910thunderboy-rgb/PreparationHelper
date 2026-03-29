@@ -29,9 +29,24 @@ export default function Profile() {
   }, []);
 
   useEffect(() => {
-    setGeminiKey(localStorage.getItem("geminiApiKey") || "");
-    setRapidKey(localStorage.getItem("rapidApiKey") || "");
-  }, []);
+    if (user) {
+      // Load API keys from server
+      (async () => {
+        try {
+          const { data } = await axios.get(`${API_BASE}/api/users/profile/api-keys`, {
+            withCredentials: true,
+          });
+          setGeminiKey(data.geminiApiKey || "");
+          setRapidKey(data.rapidApiKey || "");
+        } catch {
+          // Not set
+        }
+      })();
+    } else {
+      setGeminiKey(localStorage.getItem("geminiApiKey") || "");
+      setRapidKey(localStorage.getItem("rapidApiKey") || "");
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -82,23 +97,42 @@ export default function Profile() {
     }
   };
 
-  const saveApiKeys = () => {
+  const saveApiKeys = async () => {
     setApiErr(null);
     setApiMsg(null);
     try {
-      if (geminiKey.trim()) {
-        localStorage.setItem("geminiApiKey", geminiKey.trim());
+      if (user) {
+        // Save to server
+        setSavingApi(true);
+        await axios.put(
+          `${API_BASE}/api/users/profile/api-keys`,
+          {
+            geminiApiKey: geminiKey.trim(),
+            rapidApiKey: rapidKey.trim(),
+          },
+          { withCredentials: true, headers: { "Content-Type": "application/json" } }
+        );
+        setApiMsg("API keys saved securely on the server (encrypted).");
+        setGeminiKey("");
+        setRapidKey("");
       } else {
-        localStorage.removeItem("geminiApiKey");
+        // Save to localStorage
+        if (geminiKey.trim()) {
+          localStorage.setItem("geminiApiKey", geminiKey.trim());
+        } else {
+          localStorage.removeItem("geminiApiKey");
+        }
+        if (rapidKey.trim()) {
+          localStorage.setItem("rapidApiKey", rapidKey.trim());
+        } else {
+          localStorage.removeItem("rapidApiKey");
+        }
+        setApiMsg("API keys saved locally. They will be used for resume analysis and job recommendations.");
       }
-      if (rapidKey.trim()) {
-        localStorage.setItem("rapidApiKey", rapidKey.trim());
-      } else {
-        localStorage.removeItem("rapidApiKey");
-      }
-      setApiMsg("API keys saved locally. They will be used for resume analysis and job recommendations.");
     } catch (e) {
       setApiErr("Failed to save API keys.");
+    } finally {
+      setSavingApi(false);
     }
   };
 

@@ -158,7 +158,66 @@ const getLinkedInStatus = asyncHandler(async (req, res) => {
       usernameHint = "••••"
     }
   }
+
   res.status(200).json({ configured, usernameHint })
+})
+
+// @desc get API keys status
+// route /api/users/profile/api-keys
+// @method get
+const getApiKeys = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id)
+  if (!user) {
+    res.status(404)
+    throw new Error("User not found")
+  }
+
+  let geminiKey = ""
+  let rapidKey = ""
+  try {
+    geminiKey = decryptField(user.geminiApiKeyEnc) || ""
+  } catch {}
+  try {
+    rapidKey = decryptField(user.rapidApiKeyEnc) || ""
+  } catch {}
+
+  if (!geminiKey && process.env.GOOGLE_API_KEY) {
+    geminiKey = process.env.GOOGLE_API_KEY
+    user.geminiApiKeyEnc = encryptField(geminiKey)
+  }
+  if (!rapidKey && process.env.RAPIDAPI_KEY) {
+    rapidKey = process.env.RAPIDAPI_KEY
+    user.rapidApiKeyEnc = encryptField(rapidKey)
+  }
+  if (user.isModified()) {
+    await user.save()
+  }
+
+  res.status(200).json({ geminiApiKey: geminiKey, rapidApiKey: rapidKey })
+})
+
+// @desc update API keys
+// route /api/users/profile/api-keys
+// @method put
+const updateApiKeys = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id)
+  if (user) {
+    if (req.body.geminiApiKey) {
+      user.geminiApiKeyEnc = encryptField(req.body.geminiApiKey)
+    } else {
+      user.geminiApiKeyEnc = ""
+    }
+    if (req.body.rapidApiKey) {
+      user.rapidApiKeyEnc = encryptField(req.body.rapidApiKey)
+    } else {
+      user.rapidApiKeyEnc = ""
+    }
+    await user.save()
+    res.status(200).json({ message: "API keys updated" })
+  } else {
+    res.status(404)
+    throw new Error("User not found")
+  }
 })
 
 export {
@@ -169,4 +228,6 @@ export {
   updateUserProfile,
   updateLinkedInCredentials,
   getLinkedInStatus,
+  getApiKeys,
+  updateApiKeys,
 }
