@@ -62,26 +62,6 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-app.post("/api/users/", (req, res) => {
-  console.log("[ROUTE] POST /api/users/", req.body);
-  res.json({ status: "ok", message: "Register endpoint" });
-});
-
-app.post("/api/users/auth", (req, res) => {
-  console.log("[ROUTE] POST /api/users/auth");
-  res.json({ status: "ok", message: "Auth endpoint" });
-});
-
-app.post("/api/users/logout", (req, res) => {
-  console.log("[ROUTE] POST /api/users/logout");
-  res.cookie("jwt", "", {
-    httpOnly: true,
-    expires: new Date(0),
-    sameSite: "strict",
-  });
-  res.status(200).json({ message: "User logged out" });
-});
-
 // Mount user routes before proxies
 app.use("/api/users", userRoutes);
 
@@ -160,7 +140,8 @@ app.use((req, res) => {
 // Error handler
 app.use((err, req, res, next) => {
   console.error("[ERROR]", err.message);
-  res.status(500).json({ error: err.message });
+  const statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : 500;
+  res.status(statusCode).json({ error: err.message });
 });
 
 console.log("[VERCEL] ✅ Express app initialized");
