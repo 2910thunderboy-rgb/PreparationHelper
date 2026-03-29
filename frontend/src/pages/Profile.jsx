@@ -38,7 +38,8 @@ export default function Profile() {
           });
           setGeminiKey(data.geminiApiKey || "");
           setRapidKey(data.rapidApiKey || "");
-        } catch {
+        } catch (err) {
+          console.error("[API Keys Error]", err.response?.status, err.message);
           // Not set
         }
       })();
@@ -59,7 +60,8 @@ export default function Profile() {
           configured: data.configured,
           usernameHint: data.usernameHint || "",
         });
-      } catch {
+      } catch (err) {
+        console.error("[LinkedIn Status Error]", err.response?.status, err.message);
         /* not logged in or no key */
       }
     })();
