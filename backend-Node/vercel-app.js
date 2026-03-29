@@ -80,6 +80,24 @@ app.get("/db-ready", (req, res) => {
   res.status(200).json({ dbReady, nodeEnv, mongoUri, uriLength, uriEndsWithNewline });
 });
 
+app.get("/test-db", async (req, res) => {
+  try {
+    const mongoose = (await import('mongoose')).default;
+    const uri = process.env.MONGO_URI;
+    console.log("[TEST-DB] Attempting connection...");
+    const conn = await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
+    });
+    console.log("[TEST-DB] Connected:", conn.connection.host);
+    res.status(200).json({ success: true, host: conn.connection.host });
+    await mongoose.disconnect();
+  } catch (error) {
+    console.error("[TEST-DB] Error:", error.message);
+    res.status(500).json({ success: false, error: error.message, details: error });
+  }
+});
+
 // Mount user routes before proxies
 app.use("/api/users", userRoutes);
 
