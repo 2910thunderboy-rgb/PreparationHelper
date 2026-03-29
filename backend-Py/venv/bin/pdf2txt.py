@@ -1,4 +1,4 @@
-#!/Users/shaunak/Documents/Intuit/project/backend-Py/venv/bin/python3
+#!/Users/shaunak/Documents/Intuit/project/backend-Py/venv/bin/python3.14
 """A command line tool for extracting text and images from PDF and
 output it to plain text, html, xml or tags."""
 import argparse

@@ -68,103 +68,71 @@ app.post("/api/users/logout", (req, res) => {
   res.status(200).json({ message: "User logged out" });
 });
 
-// Proxy routes to Python backend (mock for now)
-const PYTHON_BASE = process.env.NODE_ENV === "production" ? "https://career-ai-py.vercel.app" : "http://localhost:8000";
+// Proxy routes to Python backend
+const PYTHON_BASE =
+  process.env.PYTHON_BASE ||
+  (process.env.NODE_ENV === "production"
+    ? "https://career-ai-py.vercel.app"
+    : "http://localhost:8000");
 
-app.post("/api/analyze-resume/", async (req, res) => {
-  console.log("[PROXY] POST /api/analyze-resume/");
+console.log("[PROXY] PYTHON_BASE", PYTHON_BASE);
+
+const proxyRequest = async (req, res, pythonPath) => {
+  const targetUrl = `${PYTHON_BASE}${pythonPath}`;
+  console.log(`[PROXY] ${req.method} ${req.originalUrl} -> ${targetUrl}`);
+
+  const headers = { ...req.headers };
+  delete headers.host;
+  delete headers['content-length'];
+
+  const isJson = req.is('application/json') || req.is('application/x-www-form-urlencoded');
+  const body = (req.method === 'GET' || req.method === 'HEAD') ? undefined : (isJson ? req.body : req);
+
   try {
-    const response = await axios.post(`${PYTHON_BASE}/analyze-resume/`, req, {
-      headers: {
-        ...req.headers,
-        host: new URL(PYTHON_BASE).host,
-      },
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      headers,
+      data: body,
+      responseType: 'stream',
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
+      timeout: 120000,
     });
-    res.status(response.status).set(response.headers).send(response.data);
+
+    Object.entries(response.headers).forEach(([key, value]) => {
+      const lower = key.toLowerCase();
+      if (['transfer-encoding', 'connection', 'content-length'].includes(lower)) return;
+      res.setHeader(key, value);
+    });
+
+    res.status(response.status);
+    response.data.pipe(res);
   } catch (err) {
-    console.error("[PROXY ERROR]", err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[PROXY ERROR]', req.method, req.originalUrl, err.message || err);
+    const status = err.response?.status || 502;
+    const data = err.response?.data;
+
+    if (data && data.pipe) {
+      res.status(status);
+      data.pipe(res);
+    } else {
+      res.status(status).json({ error: err.message || 'Proxy error', details: err.response?.data || null });
+    }
   }
-});
+};
 
-app.get("/job-recommendations", async (req, res) => {
-  console.log("[MOCK] GET /job-recommendations");
-  // Mock response
-  res.json({
-    jobs: [
-      {
-        title: "Software Engineer",
-        company: "Tech Corp",
-        location: "Remote",
-        salary: "$80k - $120k",
-        description: "Looking for experienced software engineer...",
-        url: "https://example.com/job1"
-      },
-      {
-        title: "Full Stack Developer",
-        company: "Startup Inc",
-        location: "San Francisco",
-        salary: "$90k - $130k",
-        description: "Join our team to build amazing products...",
-        url: "https://example.com/job2"
-      }
-    ]
-  });
-});
+app.post('/api/analyze-resume/', (req, res) => proxyRequest(req, res, '/analyze-resume/'));
+app.get('/job-recommendations', (req, res) => proxyRequest(req, res, '/job-recommendations'));
+app.post('/api/interview-evaluate', (req, res) => proxyRequest(req, res, '/interview/evaluate'));
+app.post('/api/resume/tailor-latex', (req, res) => proxyRequest(req, res, '/resume/tailor-latex'));
+app.post('/api/referral/linkedin-mutuals', (req, res) => proxyRequest(req, res, '/referral/linkedin-mutuals'));
+app.post('/api/referral/generate-message', (req, res) => proxyRequest(req, res, '/referral/generate-message'));
+app.get('/api/users/profile/linkedin', (req, res) => proxyRequest(req, res, '/job-recommendations/linkedin'));
+app.put('/api/users/profile/linkedin', (req, res) => proxyRequest(req, res, '/job-recommendations/linkedin'));
 
-app.post("/api/interview-evaluate", async (req, res) => {
-  console.log("[MOCK] POST /api/interview-evaluate");
-  // Mock response
-  res.json({
-    evaluation: "Your interview response was good. You demonstrated knowledge of the topic and provided a clear explanation. To improve: Add more specific examples and consider edge cases."
-  });
-});
 
-app.post("/api/resume/tailor-latex", async (req, res) => {
-  console.log("[MOCK] POST /api/resume/tailor-latex");
-  // Mock response
-  res.json({
-    tailored_resume: "\\documentclass{article}\\begin{document}Mock tailored resume content...\\end{document}"
-  });
-});
 
-app.post("/api/referral/linkedin-mutuals", async (req, res) => {
-  console.log("[MOCK] POST /api/referral/linkedin-mutuals");
-  // Mock response
-  res.json({
-    mutuals: [
-      { name: "John Doe", profile: "https://linkedin.com/in/johndoe" },
-      { name: "Jane Smith", profile: "https://linkedin.com/in/janesmith" }
-    ]
-  });
-});
-
-app.post("/api/referral/generate-message", async (req, res) => {
-  console.log("[MOCK] POST /api/referral/generate-message");
-  // Mock response
-  res.json({
-    message: "Hi [Name], I came across this opportunity and thought it might be a great fit for you. Would you be interested in learning more?"
-  });
-});
-
-app.get("/api/users/profile/linkedin", async (req, res) => {
-  console.log("[MOCK] GET /api/users/profile/linkedin");
-  // Mock response
-  res.json({
-    status: "connected",
-    username: "mockuser"
-  });
-});
-
-app.put("/api/users/profile/linkedin", async (req, res) => {
-  console.log("[MOCK] PUT /api/users/profile/linkedin");
-  // Mock response
-  res.json({
-    message: "LinkedIn credentials updated successfully"
-  });
-});
 
 app.use((req, res) => {
   console.log("[404]", req.method, req.path);
