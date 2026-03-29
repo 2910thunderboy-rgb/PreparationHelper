@@ -71,6 +71,12 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+app.get("/db-ready", (req, res) => {
+  const nodeEnv = process.env.NODE_ENV || "(undefined)";
+  const mongoUri = process.env.MONGO_URI ? "set" : "missing";
+  res.status(200).json({ dbReady, nodeEnv, mongoUri });
+});
+
 // Mount user routes before proxies
 app.use("/api/users", userRoutes);
 

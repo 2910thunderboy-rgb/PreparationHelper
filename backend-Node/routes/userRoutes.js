@@ -7,6 +7,8 @@ import {
   updateUserProfile,
   updateLinkedInCredentials,
   getLinkedInStatus,
+  getApiKeys,
+  updateApiKeys,
 } from "../controllers/userController.js"
 import { protect } from "../middlewares/authMiddleware.js"
 import dotenv from "dotenv"
