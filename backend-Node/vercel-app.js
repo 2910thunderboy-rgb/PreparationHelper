@@ -49,37 +49,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
-// If DB isn’t ready, fail fast with 503 instead of query timeout 500.
-app.use((req, res, next) => {
-  if (!dbReady) {
-    console.error("[VERCEL] DB not ready yet for", req.method, req.path);
-    return res.status(503).json({ error: "Service unavailable: DB not connected" });
-  }
-  next();
-});
-
-console.log("[VERCEL] Middleware configured");
-
-// Simple routes
-app.get("/", (req, res) => {
-  console.log("[ROUTE] GET /");
-  res.json({ status: "ok", message: "Backend is running" });
-});
-
-app.get("/health", (req, res) => {
-  console.log("[ROUTE] GET /health");
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
-app.get("/db-ready", (req, res) => {
-  const nodeEnv = process.env.NODE_ENV || "(undefined)";
-  const mongoUri = process.env.MONGO_URI ? "set" : "missing";
-  const uriLength = process.env.MONGO_URI ? process.env.MONGO_URI.length : 0;
-  const uriEndsWithNewline = process.env.MONGO_URI ? process.env.MONGO_URI.endsWith('\n') : false;
-  console.log("[DEBUG] MONGO_URI length:", uriLength, "ends with newline:", uriEndsWithNewline);
-  res.status(200).json({ dbReady, nodeEnv, mongoUri, uriLength, uriEndsWithNewline });
-});
-
+// debug endpoint before DB check
 app.get("/test-db", async (req, res) => {
   try {
     const mongoose = (await import('mongoose')).default;
@@ -96,6 +66,15 @@ app.get("/test-db", async (req, res) => {
     console.error("[TEST-DB] Error:", error.message);
     res.status(500).json({ success: false, error: error.message, details: error });
   }
+});
+
+// If DB isn’t ready, fail fast with 503 instead of query timeout 500.
+app.use((req, res, next) => {
+  if (!dbReady) {
+    console.error("[VERCEL] DB not ready yet for", req.method, req.path);
+    return res.status(503).json({ error: "Service unavailable: DB not connected" });
+  }
+  next();
 });
 
 // Mount user routes before proxies
