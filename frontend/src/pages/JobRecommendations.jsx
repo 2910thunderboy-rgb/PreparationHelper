@@ -105,8 +105,14 @@ const JobRecommendations = () => {
       setFromCache(false);
       setLoading(true);
       try {
+        const headers = {};
+        const rapidKey = localStorage.getItem("rapidApiKey");
+        if (rapidKey) {
+          headers["X-RapidAPI-Key"] = rapidKey;
+        }
         const res = await axios.get(`${API_BASE}/job-recommendations`, {
           params: { keywords, location },
+          headers,
           withCredentials: true,
         });
         const list = Array.isArray(res.data.jobs) ? res.data.jobs : [];

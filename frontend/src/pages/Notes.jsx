@@ -12,16 +12,55 @@ import {
   Minimize2,
 } from "lucide-react";
 
+const FALLBACK_TOPICS = [
+  {
+    id: "python",
+    title: "Python",
+    description: "Python — reference (fallback)",
+    format: "pdf",
+    path: "/notes/Python.pdf",
+  },
+  {
+    id: "java",
+    title: "Java",
+    description: "Java — reference (fallback)",
+    format: "pdf",
+    path: "/notes/Java.pdf",
+  },
+  {
+    id: "kubernetes",
+    title: "Kubernetes",
+    description: "Kubernetes — reference (fallback)",
+    format: "pdf",
+    path: "/notes/Kubernetes.pdf",
+  },
+  {
+    id: "pyspark",
+    title: "PySpark",
+    description: "PySpark — reference (fallback)",
+    format: "pdf",
+    path: "/notes/Pyspark.pdf",
+  },
+];
+
 export default function Notes() {
   const { topicId } = useParams();
   const navigate = useNavigate();
   const [manifest, setManifest] = useState(null);
   const [manifestError, setManifestError] = useState(null);
+  const [topics, setTopics] = useState(FALLBACK_TOPICS);
   const viewerRef = useRef(null);
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    const timeout = setTimeout(() => {
+      if (!cancelled) {
+        setManifestError("Notes loading timed out. Using fallback notes list.");
+        setTopics(FALLBACK_TOPICS);
+      }
+    }, 8000);
+
     fetch("/notes/manifest.json")
       .then((r) => {
         if (!r.ok) throw new Error("Unable to load study materials.");
@@ -29,25 +68,30 @@ export default function Notes() {
       })
       .then((data) => {
         if (!cancelled) {
+          clearTimeout(timeout);
           setManifest(data);
+          setTopics(
+            (data?.topics || []).filter((t) => t.format === "pdf" && t.path)
+          );
           setManifestError(null);
         }
       })
       .catch((e) => {
         if (!cancelled) {
-          setManifestError(e.message || "Something went wrong.");
+          clearTimeout(timeout);
+          setManifestError(
+            e.message || "Something went wrong while loading notes. Using fallback list."
+          );
+          setTopics(FALLBACK_TOPICS);
         }
       });
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, []);
 
-  const topics = useMemo(
-    () => (manifest?.topics || []).filter((t) => t.format === "pdf" && t.path),
-    [manifest]
-  );
-
+  // topics are preloaded from manifest or fallback list in state
   useEffect(() => {
     if (!topics.length) return;
     if (!topicId) {

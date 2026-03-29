@@ -40,6 +40,11 @@ const AnalyzeResume = () => {
     formData.append("file", file);
     formData.append("job_description", jobDescription);
 
+    const geminiKey = localStorage.getItem("geminiApiKey");
+    if (geminiKey) {
+      formData.append("gemini_api_key", geminiKey);
+    }
+
     setLoading(true);
     setAnalysis("");
     setError("");
