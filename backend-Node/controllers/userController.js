@@ -117,10 +117,6 @@ const updateLinkedInCredentials = asyncHandler(async (req, res) => {
     res.status(400)
     throw new Error("linkedinUsername and linkedinPassword are required")
   }
-  if (!process.env.FIELD_ENCRYPTION_KEY) {
-    res.status(500)
-    throw new Error("Server encryption key is not configured (FIELD_ENCRYPTION_KEY)")
-  }
 
   const user = await User.findById(req.user._id)
   if (!user) {

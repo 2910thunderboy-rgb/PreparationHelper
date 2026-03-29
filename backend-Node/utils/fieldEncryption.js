@@ -5,24 +5,42 @@ const IV_LEN = 16;
 const TAG_LEN = 16;
 const KEY_LEN = 32;
 
+/** Cached key when deriving from JWT_SECRET (avoid re-hashing every call). */
+let _derivedKeyCache = null;
+
 /**
- * Derives a 32-byte key from FIELD_ENCRYPTION_KEY env.
- * Accepts 64 hex characters OR a 44-char base64 string (32 bytes).
+ * 32-byte AES key from:
+ * 1) FIELD_ENCRYPTION_KEY — preferred (64 hex or 32-byte base64)
+ * 2) Else SHA-256 of JWT_SECRET with a fixed prefix (dev convenience; rotate FIELD_ENCRYPTION_KEY for production)
  */
 function getKey() {
   const raw = process.env.FIELD_ENCRYPTION_KEY;
-  if (!raw) {
-    throw new Error("FIELD_ENCRYPTION_KEY is not set (use openssl rand -hex 32)");
+  if (raw && String(raw).trim()) {
+    const trimmed = raw.trim();
+    if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+      return Buffer.from(trimmed, "hex");
+    }
+    const b = Buffer.from(trimmed, "base64");
+    if (b.length !== KEY_LEN) {
+      throw new Error("FIELD_ENCRYPTION_KEY must be 64 hex chars or 32-byte base64");
+    }
+    return b;
   }
-  const trimmed = raw.trim();
-  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-    return Buffer.from(trimmed, "hex");
+
+  const jwt = process.env.JWT_SECRET;
+  if (!jwt || !String(jwt).trim()) {
+    throw new Error(
+      "Set JWT_SECRET in backend-Node/.env, or set FIELD_ENCRYPTION_KEY (openssl rand -hex 32)"
+    );
   }
-  const b = Buffer.from(trimmed, "base64");
-  if (b.length !== KEY_LEN) {
-    throw new Error("FIELD_ENCRYPTION_KEY must be 64 hex chars or 32-byte base64");
+
+  if (!_derivedKeyCache) {
+    _derivedKeyCache = crypto
+      .createHash("sha256")
+      .update(`careerai:field-encryption:v1:${jwt}`, "utf8")
+      .digest();
   }
-  return b;
+  return _derivedKeyCache;
 }
 
 export function encryptField(plainText) {

@@ -18,15 +18,47 @@ from datetime import datetime
 import google.generativeai as genai
 from bs4 import BeautifulSoup
 
-# Load environment variables
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+# Load environment variables (secrets only in backend-Py/.env — same idea as Node)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
-# Configure Gemini AI - with error handling for missing key
+
+def _env_flag(name: str, placeholder: Optional[str] = None) -> bool:
+    v = os.getenv(name)
+    if not v or not str(v).strip():
+        return False
+    if placeholder and v.strip() == placeholder:
+        return False
+    return True
+
+
+def _log_secret_status() -> None:
+    """Log which keys are configured (never print secret values)."""
+    print(
+        "[env] GOOGLE_API_KEY (Gemini):",
+        "set"
+        if _env_flag("GOOGLE_API_KEY", "your_google_gemini_api_key_here")
+        else "missing — add to backend-Py/.env",
+    )
+    print(
+        "[env] RAPIDAPI_KEY (JSearch):",
+        "set" if _env_flag("RAPIDAPI_KEY") else "missing — optional job API backup",
+    )
+    print(
+        "[env] LINKEDIN credentials:",
+        "set"
+        if (_env_flag("LINKEDIN_USERNAME") and _env_flag("LINKEDIN_PASSWORD"))
+        else "missing — optional if using Profile (Node) encrypted creds",
+    )
+
+
+_log_secret_status()
+
+# Configure Gemini AI
 api_key = os.getenv("GOOGLE_API_KEY")
 if api_key and api_key != "your_google_gemini_api_key_here":
     genai.configure(api_key=api_key)
 else:
-    print("WARNING: GOOGLE_API_KEY not set in .env - resume analysis will fail")
+    print("WARNING: GOOGLE_API_KEY not set in backend-Py/.env — resume analysis & LaTeX skills will fail")
 
 # Initialize FastAPI app
 app = FastAPI()
