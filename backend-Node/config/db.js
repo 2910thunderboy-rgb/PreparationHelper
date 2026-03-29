@@ -32,4 +32,7 @@ const connectDB = async () => {
         }
     }
 
+    return false;
+};
+
 export default connectDB;
