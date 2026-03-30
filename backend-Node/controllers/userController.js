@@ -1,6 +1,7 @@
 import asyncHandler from "express-async-handler"
 import User from "../models/userModel.js"
 import generateToken from "../utils/generateToken.js"
+import { encryptField, decryptField } from "../utils/fieldEncryption.js"
 
 // @desc user token
 // route /api/users/auth
@@ -64,6 +65,7 @@ const logoutUser = asyncHandler(async (req, res) => {
   res.cookie("jwt", "", {
     httpOnly: true,
     expires: new Date(0),
+    sameSite: "strict",
   })
   res.status(200).json({ message: "User logged out" })
 })
@@ -107,4 +109,125 @@ const updateUserProfile = asyncHandler(async (req, res) => {
   }
 })
 
-export { authUser, registerUser, logoutUser, getUserProfile, updateUserProfile }
+// @desc Save LinkedIn credentials (encrypted at rest; never returned in full)
+// PUT /api/users/profile/linkedin
+const updateLinkedInCredentials = asyncHandler(async (req, res) => {
+  const { linkedinUsername, linkedinPassword } = req.body
+  if (!linkedinUsername || !linkedinPassword) {
+    res.status(400)
+    throw new Error("linkedinUsername and linkedinPassword are required")
+  }
+
+  const user = await User.findById(req.user._id)
+  if (!user) {
+    res.status(404)
+    throw new Error("User not found")
+  }
+  user.linkedinUsernameEnc = encryptField(String(linkedinUsername).trim())
+  user.linkedinPasswordEnc = encryptField(String(linkedinPassword))
+  await user.save()
+
+  res.status(200).json({
+    message: "LinkedIn credentials stored securely (encrypted)",
+    configured: true,
+  })
+})
+
+// @desc Whether LinkedIn is configured (no secrets returned)
+// GET /api/users/profile/linkedin
+const getLinkedInStatus = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select(
+    "linkedinUsernameEnc linkedinPasswordEnc"
+  )
+  if (!user) {
+    res.status(404)
+    throw new Error("User not found")
+  }
+  const configured = !!(user.linkedinPasswordEnc && user.linkedinUsernameEnc)
+  let usernameHint = ""
+  if (configured && user.linkedinUsernameEnc) {
+    try {
+      const u = decryptField(user.linkedinUsernameEnc)
+      if (u.includes("@")) {
+        const [local, dom] = u.split("@")
+        usernameHint = `${local.slice(0, 2)}***@${dom?.slice(0, 1) ?? ""}***`
+      } else {
+        usernameHint = `${u.slice(0, 3)}***`
+      }
+    } catch {
+      usernameHint = "••••"
+    }
+  }
+
+  res.status(200).json({ configured, usernameHint })
+})
+
+// @desc get API keys status
+// route /api/users/profile/api-keys
+// @method get
+const getApiKeys = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id)
+  if (!user) {
+    res.status(404)
+    throw new Error("User not found")
+  }
+
+  let geminiKey = ""
+  let rapidKey = ""
+  try {
+    geminiKey = decryptField(user.geminiApiKeyEnc) || ""
+  } catch {}
+  try {
+    rapidKey = decryptField(user.rapidApiKeyEnc) || ""
+  } catch {}
+
+  if (!geminiKey && process.env.GOOGLE_API_KEY) {
+    geminiKey = process.env.GOOGLE_API_KEY
+    user.geminiApiKeyEnc = encryptField(geminiKey)
+  }
+  if (!rapidKey && process.env.RAPIDAPI_KEY) {
+    rapidKey = process.env.RAPIDAPI_KEY
+    user.rapidApiKeyEnc = encryptField(rapidKey)
+  }
+  if (user.isModified()) {
+    await user.save()
+  }
+
+  res.status(200).json({ geminiApiKey: geminiKey, rapidApiKey: rapidKey })
+})
+
+// @desc update API keys
+// route /api/users/profile/api-keys
+// @method put
+const updateApiKeys = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id)
+  if (user) {
+    if (req.body.geminiApiKey) {
+      user.geminiApiKeyEnc = encryptField(req.body.geminiApiKey)
+    } else {
+      user.geminiApiKeyEnc = ""
+    }
+    if (req.body.rapidApiKey) {
+      user.rapidApiKeyEnc = encryptField(req.body.rapidApiKey)
+    } else {
+      user.rapidApiKeyEnc = ""
+    }
+    await user.save()
+    res.status(200).json({ message: "API keys updated" })
+  } else {
+    res.status(404)
+    throw new Error("User not found")
+  }
+})
+
+export {
+  authUser,
+  registerUser,
+  logoutUser,
+  getUserProfile,
+  updateUserProfile,
+  updateLinkedInCredentials,
+  getLinkedInStatus,
+  getApiKeys,
+  updateApiKeys,
+}

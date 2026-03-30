@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "generated": "2026-03-29T16:59:00.107Z",
+  "topics": [
+    {
+      "id": "java",
+      "title": "Java",
+      "description": "Java — reference",
+      "format": "pdf",
+      "path": "/notes/Java.pdf",
+      "filename": "Java.pdf"
+    },
+    {
+      "id": "kubernetes",
+      "title": "Kubernetes",
+      "description": "Kubernetes — reference",
+      "format": "pdf",
+      "path": "/notes/Kubernetes.pdf",
+      "filename": "Kubernetes.pdf"
+    },
+    {
+      "id": "pyspark",
+      "title": "PySpark",
+      "description": "PySpark — reference",
+      "format": "pdf",
+      "path": "/notes/Pyspark.pdf",
+      "filename": "Pyspark.pdf"
+    },
+    {
+      "id": "python",
+      "title": "Python",
+      "description": "Python — reference",
+      "format": "pdf",
+      "path": "/notes/Python.pdf",
+      "filename": "Python.pdf"
+    }
+  ]
+}

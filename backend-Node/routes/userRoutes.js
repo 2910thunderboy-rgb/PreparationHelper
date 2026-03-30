@@ -5,9 +5,12 @@ import {
   logoutUser,
   getUserProfile,
   updateUserProfile,
+  updateLinkedInCredentials,
+  getLinkedInStatus,
+  getApiKeys,
+  updateApiKeys,
 } from "../controllers/userController.js"
 import { protect } from "../middlewares/authMiddleware.js"
-import axios from "axios"
 import dotenv from "dotenv"
 dotenv.config()
 
@@ -20,6 +23,17 @@ router
   .route("/profile")
   .get(protect, getUserProfile)
   .put(protect, updateUserProfile)
+
+router
+  .route("/profile/linkedin")
+  .get(protect, getLinkedInStatus)
+  .put(protect, updateLinkedInCredentials)
+
+router
+  .route("/profile/api-keys")
+  .get(protect, getApiKeys)
+  .put(protect, updateApiKeys)
+  .post(protect, updateApiKeys)
 
 router.get("/get" ,(req,res) =>{
   res.send("backend working")

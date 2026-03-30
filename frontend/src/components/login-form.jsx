@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn, API_BASE } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import axios from "axios";
 import { useNavigate } from "react-router"
@@ -20,24 +20,30 @@ export function LoginForm(props) {
   const navigate = useNavigate()
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   
   const { className, ...rest } = props;
 
   const handleSubmit = async (e) => {
       e.preventDefault()
+      setError("");
+      setLoading(true);
       try {
-        await axios.post("http://localhost:3000/api/users/auth", {
+        const response = await axios.post(`${API_BASE}/api/users/auth`, {
           email,
           password,
-        })
-        .then(() => {
-          navigate('/app')
-          console.log('User logged in')
-        })
+        }, { withCredentials: true })
+        localStorage.setItem('authToken', response.data._id);
+        localStorage.setItem('user', JSON.stringify(response.data));
+        navigate('/app')
+        console.log('User logged in')
       } catch (error) {
+        setError(error.response?.data?.message || "Login failed. Please try again.");
         console.log(error)
+      } finally {
+        setLoading(false);
       }
     }
 
@@ -72,14 +78,14 @@ export function LoginForm(props) {
                     href="#"
                     className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
                   >
-                    Forgot your password?
                   </a>
                 </div>
                 <Input id="password" type="password" required  onChange={(e) => setPassword(e.target.value) }
                 />
               </div>
-              <Button type="submit" className="w-full">
-                Login
+              {error && <div className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</div>}
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? 'Logging in...' : 'Login'}
               </Button>
               {/* <Button variant="outline" className="w-full">
                 Login with Google
@@ -87,7 +93,7 @@ export function LoginForm(props) {
             </div>
             <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{" "}
-              <a href="/login" className="underline underline-offset-4">
+              <a href="/register" className="underline underline-offset-4">
                 Sign up
               </a>
             </div>

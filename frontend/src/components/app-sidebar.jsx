@@ -1,15 +1,16 @@
 import React from 'react';
 import {
-  Calendar,
   Home,
-  User,
   Briefcase,
   FileText,
   BrainCog,
-  Settings,
-  HelpCircle,
+  BookOpen,
+  UserPlus,
+  User,
   LogOut,
 } from "lucide-react";
+import axios from 'axios';
+import { API_BASE } from "@/lib/utils";
 
 import {
   Sidebar,
@@ -44,25 +45,49 @@ const mainItems = [
     url: "/app/job",
     icon: Briefcase,
   },
-];
-
-const generalItems = [
+  {
+    title: "Notes",
+    url: "/app/notes",
+    icon: BookOpen,
+  },
+  {
+    title: "Referrals",
+    url: "/app/referral",
+    icon: UserPlus,
+  },
   {
     title: "Profile",
-    url: "#",
+    url: "/app/profile",
     icon: User,
-  },
-  {
-    title: "Setting",
-    url: "#",
-    icon: Settings,
   },
 ];
 
-import {Link , useLocation} from 'react-router-dom';
+import {Link , useLocation, useNavigate} from 'react-router-dom';
+
+function isNavActive(pathname, item) {
+  if (item.url === "/app/notes") return pathname.startsWith("/app/notes");
+  if (item.url === "/app/referral") return pathname.startsWith("/app/referral");
+  if (item.url === "/app/profile") return pathname.startsWith("/app/profile");
+  return pathname === item.url;
+}
 
 export default function AppSidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    try {
+      await axios.post(`${API_BASE}/api/users/logout`, {}, { withCredentials: true });
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
+      navigate('/');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
+      navigate('/login');
+    }
+  };
   return (
     <div className="relative h-full">
       <Sidebar className="bg-[#121212] text-gray-300 border-r border-gray-800 h-full flex flex-col">
@@ -70,7 +95,9 @@ export default function AppSidebar() {
           {/* Logo */}
           <div className="flex items-center gap-2 px-4 py-4 mb-4">
             
-            <span className="font-semibold text-white">Finally Placed</span>
+            <span className="font-semibold text-white">
+              Career<span className="text-violet-400">.ai</span>
+            </span>
           </div>
           
           {/* Main menu */}
@@ -86,38 +113,14 @@ export default function AppSidebar() {
                     <Link
                          to={item.url}
                          className={`flex items-center gap-3 px-4 py-2 rounded-lg ${
-                           location.pathname === item.url
-                             ? "bg-purple-600 text-white" 
+                           isNavActive(location.pathname, item)
+                             ? "bg-purple-600 text-white"
                              : "hover:bg-gray-800 hover:text-white"
                          } transition-all`}
                        >
                         <item.icon className={`w-5 h-5 ${item.active ? "text-white" : "text-gray-400"}`} />
                         <span className="text-sm">{item.title}</span>
                       </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-          
-          {/* General menu */}
-          <SidebarGroup className="mt-4">
-            <SidebarGroupLabel className="px-4 py-2 text-sm text-gray-400">
-              General
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {generalItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild>
-                      <a
-                        href={item.url}
-                        className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-800 hover:text-white transition-all"
-                      >
-                        <item.icon className="w-5 h-5 text-gray-400" />
-                        <span className="text-sm">{item.title}</span>
-                      </a>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -136,13 +139,13 @@ export default function AppSidebar() {
           
           {/* Logout button */}
           <div className="mt-auto mb-4 px-4">
-            <a
-              href="#"
-              className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-all"
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-all"
             >
               <LogOut className="w-5 h-5" />
               <span className="text-sm">Log Out</span>
-            </a>
+            </button>
           </div>
         </SidebarContent>
       </Sidebar>

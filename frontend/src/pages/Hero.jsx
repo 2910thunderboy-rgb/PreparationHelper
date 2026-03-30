@@ -1,121 +1,119 @@
-import React, { useEffect, useState } from "react";
-import { Sparkles, Mic, Eye, User, Brain } from "lucide-react";
-import Blackhole from "../assets/blackhole.webm";
+import React from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  ArrowRight,
+  BookOpen,
+  Brain,
+  Briefcase,
+  FileText,
+  Sparkles,
+  UserPlus,
+} from "lucide-react";
 
-const Interviewee = "https://images.unsplash.com/photo-1607746882042-944635dfe10e";
+const pillars = [
+  {
+    icon: FileText,
+    title: "Resume intelligence",
+    body: "ATS-aware analysis and role-aligned feedback from your PDFs.",
+  },
+  {
+    icon: Brain,
+    title: "Mock interviews",
+    body: "Topic-based practice with AI scoring and actionable feedback.",
+  },
+  {
+    icon: Briefcase,
+    title: "Job discovery",
+    body: "Curated matches with smart caching so you iterate faster.",
+  },
+  {
+    icon: BookOpen,
+    title: "Study notes",
+    body: "Your topics and PDFs in one reader—synced and searchable.",
+  },
+  {
+    icon: UserPlus,
+    title: "Referrals",
+    body: "Outreach drafts and mutuals to warm up introductions.",
+  },
+];
 
-const Hero = () => {
-  const [feedback, setFeedback] = useState({
-    speech: "Analyzing...",
-    eye: "Analyzing...",
-    posture: "Analyzing...",
-    confidence: "Analyzing..."
-  });
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setFeedback({
-        speech: "Clear and steady",
-        eye: "Good eye contact",
-        posture: "Straight posture",
-        confidence: "Confident tone"
-      });
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, []);
+export default function Hero() {
+  const navigate = useNavigate();
 
   return (
-    <div className="relative w-full py-20 md:py-32 overflow-hidden bg-[#0d0f1a]">
-      <div className="absolute inset-0 bg-gradient-to-b from-[#1a1f2c] to-[#0d0f1a]" />
-      <video
-        className="absolute inset-0 w-full h-full object-cover opacity-80"
-        autoPlay
-        loop
-        muted
-      >
-        <source src={Blackhole} type="video/mp4" />
-      </video>
-      <div className="absolute inset-0 bg-[#0d0f1a]/10" />
+    <div className="relative min-h-screen overflow-hidden bg-[#05040a] pt-24 pb-20">
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background: `
+            radial-gradient(ellipse 100% 80% at 50% -30%, rgba(124, 58, 237, 0.35), transparent 55%),
+            radial-gradient(ellipse 60% 50% at 100% 20%, rgba(59, 130, 246, 0.12), transparent),
+            radial-gradient(ellipse 50% 40% at 0% 60%, rgba(16, 185, 129, 0.06), transparent)
+          `,
+        }}
+      />
+      <div className="pointer-events-none absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%2248%22%20height=%2248%22%3E%3Cpath%20d=%22M0%200h48v1H0z%22%20fill=%22%23fff%22%20fill-opacity=%22.02%22/%3E%3C/svg%3E')]" />
 
-      <div className="container mx-auto px-4 relative z-10">
-        <div className="flex flex-col items-center text-center mb-14">
-          <div className="mb-10">
-            <button className="bg-gradient-to-r from-purple-600 to-indigo-500 text-white rounded-full py-2 px-4 flex items-center gap-2 shadow-lg hover:scale-105 transition">
-              <Sparkles className="h-4 w-4 animate-bounce" />
-              <span>Land into your dream job</span>
-            </button>
+      <div className="relative z-10 mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-4xl text-center">
+          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-violet-200/90">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden />
+            Career workspace
           </div>
 
-          <h1 className="text-5xl md:text-7xl font-extrabold text-white mb-6 max-w-5xl drop-shadow-xl tracking-tight">
-            Get Placed with <span className="text-purple-500">Finally Placed</span>
-            <span className="text-purple-300 animate-pulse">...</span>
+          <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-6xl sm:leading-[1.08]">
+            The calmest way to{" "}
+            <span className="bg-gradient-to-r from-violet-300 via-fuchsia-200 to-indigo-300 bg-clip-text text-transparent">
+              run your job search
+            </span>
           </h1>
 
-          <p className="text-xl md:text-2xl text-gray-300 max-w-3xl mb-12">
-            Finally Placed is a one stop solution for all your placement needs.
+          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-zinc-400 sm:text-xl">
+            <span className="font-medium text-zinc-200">Career.ai</span> brings mock interviews,
+            resume analysis, job matches, study notes, and referral tools into one focused
+            experience—built for clarity, not clutter.
           </p>
 
-          <div className="w-full max-w-5xl mx-auto mt-40">
-            <div className="rounded-3xl overflow-hidden bg-gradient-to-br from-[#1A1F2C]/90 to-[#0d0f1a]/90 shadow-2xl">
-              <div className="flex flex-col md:flex-row">
-                <div className="w-full md:w-3/4 relative">
-                  <div className="bg-black h-[300px] md:h-[420px] relative">
-                    <div className="absolute top-4 left-4 text-white text-sm font-semibold">
-                      Richard Gomez <span className="block text-xs text-gray-400">Talent</span>
-                    </div>
-                    <div className="absolute top-4 right-4 text-white text-xs bg-red-600 px-3 py-1 rounded-full animate-pulse">Recording</div>
-                    <div className="flex justify-center items-center h-full">
-                      <img
-                        src={Interviewee}
-                        alt="Interviewee"
-                        className="w-40 h-40 object-cover rounded-full border-4 border-purple-600 shadow-lg"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4 bg-[#1a1f2c]/80 px-8 py-3 rounded-full shadow-xl border border-purple-500">
-                    <button className="bg-gray-800 text-white p-3 rounded-full hover:bg-gray-700 transition">
-                      <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-5 h-5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                      </svg>
-                    </button>
-                    <button className="bg-red-600 text-white p-3 rounded-full hover:bg-red-500 transition">
-                      <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-5 h-5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 5.636l-12.728 12.728M5.636 5.636l12.728 12.728" />
-                      </svg>
-                    </button>
-                    <button className="bg-gray-800 text-white p-3 rounded-full hover:bg-gray-700 transition">
-                      <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-5 h-5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="w-full md:w-1/4 bg-[#11131c]/80 border-l border-purple-800 p-4 space-y-4">
-                  <div className="text-purple-300 font-semibold text-sm mb-2">Live AI Feedback</div>
-                  <div className="text-gray-200 text-sm bg-purple-900/20 p-3 rounded-lg border border-purple-700 shadow-md">
-                    <Mic className="inline w-4 h-4 mr-2" />Speech: <span className="text-green-400 font-medium">{feedback.speech}</span>
-                  </div>
-                  <div className="text-gray-200 text-sm bg-purple-900/20 p-3 rounded-lg border border-purple-700 shadow-md">
-                    <Eye className="inline w-4 h-4 mr-2" />Eye Contact: <span className="text-green-400 font-medium">{feedback.eye}</span>
-                  </div>
-                  <div className="text-gray-200 text-sm bg-purple-900/20 p-3 rounded-lg border border-purple-700 shadow-md">
-                    <User className="inline w-4 h-4 mr-2" />Posture: <span className="text-green-400 font-medium">{feedback.posture}</span>
-                  </div>
-                  <div className="text-gray-200 text-sm bg-purple-900/20 p-3 rounded-lg border border-purple-700 shadow-md">
-                    <Brain className="inline w-4 h-4 mr-2" />Confidence: <span className="text-green-400 font-medium">{feedback.confidence}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row sm:gap-5">
+            <button
+              type="button"
+              onClick={() => navigate("/register")}
+              className="group inline-flex items-center gap-2 rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-zinc-900 shadow-xl shadow-black/40 transition hover:bg-zinc-100"
+            >
+              Get started
+              <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/login")}
+              className="rounded-full border border-white/15 bg-white/5 px-8 py-3.5 text-sm font-medium text-white backdrop-blur-sm transition hover:border-violet-500/40 hover:bg-white/10"
+            >
+              Log in
+            </button>
           </div>
-
         </div>
+
+        <div className="mx-auto mt-20 grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {pillars.map(({ icon: Icon, title, body }) => (
+            <div
+              key={title}
+              className="group rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent p-6 transition hover:border-violet-500/25 hover:from-white/[0.09]"
+            >
+              <div className="mb-4 inline-flex rounded-xl bg-violet-500/15 p-2.5 text-violet-300">
+                <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+              </div>
+              <h2 className="text-base font-semibold text-white">{title}</h2>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-500">{body}</p>
+            </div>
+          ))}
+        </div>
+
+        <p className="mx-auto mt-16 max-w-xl text-center text-sm text-zinc-600">
+          Sign in to reach your dashboard—everything you need for interviews and applications,
+          without tab overload.
+        </p>
       </div>
     </div>
   );
-};
-
-export default Hero;
+}
